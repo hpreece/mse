@@ -25,7 +25,6 @@ int root_finding_functions(realtype time, N_Vector y, realtype *root_functions, 
     extract_ODE_variables(particlesMap, y, delta_time);
        
     check_for_roots(particlesMap, true, root_functions);
-    printf("N_rootfinding = %d \n", N_root_finding);
     return 0;
 }
 
@@ -484,7 +483,6 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
             }
         }
     }
-    printf("iroot at end of check_for_roots is %d \n", i_root);
 }
 
 int investigate_roots_in_system(ParticlesMap *particlesMap, double t, int integration_flag)
@@ -987,7 +985,6 @@ int check_for_initial_roots(ParticlesMap *particlesMap)
         print_system(particlesMap,0);
     }
     #endif
-    printf("N_root_found = %d \n", N_root_found);
     return N_root_found;
 }
 
