@@ -350,7 +350,7 @@ double compute_t_V_preece
         double logz = log10(metallicity);
         double atid = 2.72 + (0.063*logz);
         double btid = 0.68 + (-0.219*logz);
-        double ctid = 0.22 + (-0.023*logz);
+        double ctid = 0.12 + (-0.023*logz);
         double mrtid = pow((convective_envelope_radius/radius),atid) * pow((convective_envelope_mass/mass),btid) * ctid;
         
         double f_convective = pow(P_tid/(2.0*tau_convective),2.0);

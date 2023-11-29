@@ -9,9 +9,8 @@ extern "C"
 {
 int root_finding_functions(realtype time, N_Vector y, realtype *root_functions, void *data_)
 {
-
-	UserData data;
-	data = (UserData) data_;
+    UserData data;
+    data = (UserData) data_;
     ParticlesMap *particlesMap = data->particlesMap;
     int N_root_finding = data->N_root_finding;
     double start_time = data->start_time;
@@ -26,13 +25,12 @@ int root_finding_functions(realtype time, N_Vector y, realtype *root_functions, 
     extract_ODE_variables(particlesMap, y, delta_time);
        
     check_for_roots(particlesMap, true, root_functions);
-
+    printf("N_rootfinding = %d \n", N_root_finding);
     return 0;
 }
 
 void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realtype *root_functions)
 {
-   
     int i_root = 0;
 
     ParticlesMapIterator it_p;
@@ -380,7 +378,7 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                 }
                 #endif
 
-                if (P_p->parent != -1)
+                
                 {
                 
                     double M = P_p->mass;
@@ -482,9 +480,11 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                 }
                 
                 i_root++;
+                
             }
         }
     }
+    printf("iroot at end of check_for_roots is %d \n", i_root);
 }
 
 int investigate_roots_in_system(ParticlesMap *particlesMap, double t, int integration_flag)
@@ -593,18 +593,26 @@ int investigate_roots_in_system(ParticlesMap *particlesMap, double t, int integr
                     collision_occurred = true;
                 }
             }
-            if (p->entering_LISA_band_has_occurred == true and return_flag == 0)
+            if (p->entering_LISA_band_has_occurred == true)
+            /*if (p->entering_LISA_band_has_occurred == true and return_flag == 0) */
             {
+                
                 p->entering_LISA_band_has_occurred = false;
                 p->check_for_entering_LISA_band_occurrences++;
 
+                if (return_flag ==0)
+                {
                 return_flag = 5;
-
+                
                 #ifdef LOGGING
                 Log_info_type log_info;
                 log_info.binary_index = p->index;
                 update_log_data(particlesMap, t, integration_flag, LOG_ENTER_LISA_BAND, log_info);
+                
                 #endif
+                }
+
+
             }
             
         }
@@ -942,7 +950,7 @@ int check_for_initial_roots(ParticlesMap *particlesMap)
             {
                 if (P_p->entering_LISA_band_has_occurred == true)
                 {
-                    N_root_found++;
+                    N_root_found++; 
 
                     #ifdef VERBOSE
                     if (verbose_flag > 0)
@@ -979,7 +987,7 @@ int check_for_initial_roots(ParticlesMap *particlesMap)
         print_system(particlesMap,0);
     }
     #endif
-
+    printf("N_root_found = %d \n", N_root_found);
     return N_root_found;
 }
 
