@@ -10,9 +10,9 @@
 #############
 
 ### The following are the default settings for generic Linux x86-64 assuming a gcc installation 
-CC = gcc
-CXX = g++
-FC = gfortran
+#CC = gcc
+#CXX = g++
+#FC = gfortran
 
 
 ##################
@@ -20,11 +20,11 @@ FC = gfortran
 ##################
 
 ### The following is known to work on macOS 10.15.7 (Intel).
-### XCode/Developer tools installed, gcc (version 11) and Python3 installed with homebrew 
+### XCode/Developer tools installed, gcc (version 13) and Python3 installed with homebrew 
 
-#CC = clang
-#CXX = g++-11
-#FC = gfortran-11
+CC = clang
+CXX = g++-13
+FC = gfortran-13
 
 
 ##############
