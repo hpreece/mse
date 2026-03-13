@@ -2627,7 +2627,7 @@ class Tools(object):
                 import pickle
                 print("Saving output data to ",plot_filename + ".pkl")
                 try:
-                    with open(plot_filename + ".pkl",'wb') as file:
+                    with open("data/"+plot_filename + ".pkl",'wb') as file:
                         data = pickle.dump(data,file)
                 except IOError:
                     print("Error saving output data to ",plot_filename + ".pkl; make sure the path exists and/or enough disk space is available.")
@@ -2690,7 +2690,7 @@ class Tools(object):
                 if index_log == 0:
                     plot.legend(handles = legend_elements, bbox_to_anchor = (-0.05, 1.50), loc = 'upper left', ncol = 5,fontsize=0.85*fontsize)
                 
-            fig.savefig(plot_filename + "_mobile.pdf")
+            fig.savefig("figs/"+plot_filename + "_mobile.pdf")
         
             fig=pyplot.figure(figsize=(8,10))
             Np=4
@@ -2771,9 +2771,9 @@ class Tools(object):
             plot_HRD.set_ylabel(r"$\mathrm{log}_{10}(L/L_\odot)$",fontsize=fontsize)
             plot_HRD.tick_params(axis='both', which ='major', labelsize = labelsize,bottom=True, top=True, left=True, right=True)
             
-            fig.savefig(plot_filename + ".pdf")
-            fig_pos.savefig(plot_filename + "_pos.pdf")
-            fig_HRD.savefig(plot_filename + "_HRD.pdf")
+            fig.savefig("figs/"+plot_filename + ".pdf")
+            fig_pos.savefig("figs/"+plot_filename + "_pos.pdf")
+            fig_HRD.savefig("figs/"+plot_filename + "_HRD.pdf")
             
             print("Plots generated and written to disk.") 
             
