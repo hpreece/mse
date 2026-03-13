@@ -2358,7 +2358,7 @@ class Tools(object):
                             parent = particle_2.parent
                      
     @staticmethod
-    def evolve_system(configuration,N_bodies,masses,metallicities,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,tend,N_steps,stellar_types=[],make_plots=True,fancy_plots=False,plot_filename="test1",show_plots=True,object_types=[],random_seed=0,verbose_flag=0,include_WD_kicks=False,kick_distribution_sigma_km_s_WD=1.0,NS_model=0,ECSNe_model=0,kick_distribution_sigma_km_s_NS=265.0,kick_distribution_sigma_km_s_BH=50.0,flybys_stellar_density_per_cubic_pc=0.1,flybys_encounter_sphere_radius_au=1.0e5,flybys_stellar_relative_velocity_dispersion_km_s=30.0,flybys_include_secular_encounters=False,include_flybys=True,save_data=False,plot_only=False,wall_time_max_s=3.6e4,common_envelope_timescale=1.0e3,binary_evolution_SNe_Ia_single_degenerate_model=0,binary_evolution_SNe_Ia_double_degenerate_model=0,effective_radius_multiplication_factor_for_collisions_compact_objects=100.0,effective_radius_multiplication_factor_for_collisions_stars=1.0,tides_viscous_time_scale_prescription=1):
+    def evolve_system(configuration,N_bodies,masses,metallicities,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,tend,N_steps,stellar_types=[],make_plots=True,fancy_plots=False,plot_filename="test1",show_plots=True,object_types=[],random_seed=0,verbose_flag=0,include_WD_kicks=False,kick_distribution_sigma_km_s_WD=1.0,NS_model=0,ECSNe_model=0,kick_distribution_sigma_km_s_NS=265.0,kick_distribution_sigma_km_s_BH=50.0,flybys_stellar_density_per_cubic_pc=0.1,flybys_encounter_sphere_radius_au=1.0e5,flybys_stellar_relative_velocity_dispersion_km_s=30.0,flybys_include_secular_encounters=False,include_flybys=True,save_data=False,plot_only=False,wall_time_max_s=3.6e4,common_envelope_timescale=1.0e3,binary_evolution_SNe_Ia_single_degenerate_model=0,binary_evolution_SNe_Ia_double_degenerate_model=0,effective_radius_multiplication_factor_for_collisions_compact_objects=100.,effective_radius_multiplication_factor_for_collisions_stars=1.0,tides_viscous_time_scale_prescription=1):
 
         np.random.seed(random_seed)
         
@@ -2627,7 +2627,7 @@ class Tools(object):
                 import pickle
                 print("Saving output data to ",plot_filename + ".pkl")
                 try:
-                    with open("data/"+plot_filename + ".pkl",'wb') as file:
+                    with open(plot_filename + ".pkl",'wb') as file:
                         data = pickle.dump(data,file)
                 except IOError:
                     print("Error saving output data to ",plot_filename + ".pkl; make sure the path exists and/or enough disk space is available.")
@@ -2690,7 +2690,7 @@ class Tools(object):
                 if index_log == 0:
                     plot.legend(handles = legend_elements, bbox_to_anchor = (-0.05, 1.50), loc = 'upper left', ncol = 5,fontsize=0.85*fontsize)
                 
-            fig.savefig("figs/"+plot_filename + "_mobile.pdf")
+            fig.savefig(plot_filename + "_mobile.pdf")
         
             fig=pyplot.figure(figsize=(8,10))
             Np=4
@@ -2771,9 +2771,9 @@ class Tools(object):
             plot_HRD.set_ylabel(r"$\mathrm{log}_{10}(L/L_\odot)$",fontsize=fontsize)
             plot_HRD.tick_params(axis='both', which ='major', labelsize = labelsize,bottom=True, top=True, left=True, right=True)
             
-            fig.savefig("figs/"+plot_filename + ".pdf")
-            fig_pos.savefig("figs/"+plot_filename + "_pos.pdf")
-            fig_HRD.savefig("figs/"+plot_filename + "_HRD.pdf")
+            fig.savefig(plot_filename + ".pdf")
+            fig_pos.savefig(plot_filename + "_pos.pdf")
+            fig_HRD.savefig(plot_filename + "_HRD.pdf")
             
             print("Plots generated and written to disk.") 
             
