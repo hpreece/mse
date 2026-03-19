@@ -675,23 +675,35 @@ void compute_estimated_tidal_apsidal_motion_timescales(double M, double m, doubl
     
     double f_tides2 = f_tides2_function_BO(e_p2,j_p10_inv,j_p13_inv);
 
-    double spin_vec_dot_e_vec = dot3(spin_vec,e_vec);
-    double spin_vec_dot_h_vec = dot3(spin_vec,h_vec);
-
     double h = norm3(h_vec);
-    double q_vec_unit[3];
-    cross3(h_vec,e_vec,q_vec_unit); /* not yet normalised */
-    double q_norm = norm3(q_vec_unit);
-    for (int i=0; i<3; i++)
-    {
-        q_vec_unit[i] = q_vec_unit[i]/q_norm;
-    }
-
-    double spin_vec_dot_e_vec_unit = dot3(spin_vec,e_vec)/e;
     double spin_vec_dot_h_vec_unit = dot3(spin_vec,h_vec)/h;
-    double spin_vec_dot_q_vec_unit = dot3(spin_vec,q_vec_unit);
-    
-    double Z_rot = C*c_1div2*j_p4_inv*(2.0*spin_vec_dot_h_vec_unit*spin_vec_dot_h_vec_unit - spin_vec_dot_q_vec_unit*spin_vec_dot_q_vec_unit - spin_vec_dot_e_vec_unit*spin_vec_dot_e_vec_unit);
+
+    double Z_rot;
+    if (e <= epsilon)
+    {
+        /* C12 fix: for circular orbits (e~0), the eccentricity vector direction is
+         * undefined, making the individual projections onto e_hat and q_hat singular.
+         * Use the identity: 2*(s.h_hat)^2 - (s.q_hat)^2 - (s.e_hat)^2
+         *                 = 3*(s.h_hat)^2 - |s|^2
+         * which holds for any orthonormal triad and avoids the division by e. */
+        double spin_vec_sq = dot3(spin_vec,spin_vec);
+        Z_rot = C*c_1div2*j_p4_inv*(3.0*spin_vec_dot_h_vec_unit*spin_vec_dot_h_vec_unit - spin_vec_sq);
+    }
+    else
+    {
+        double q_vec_unit[3];
+        cross3(h_vec,e_vec,q_vec_unit); /* not yet normalised */
+        double q_norm = norm3(q_vec_unit);
+        for (int i=0; i<3; i++)
+        {
+            q_vec_unit[i] = q_vec_unit[i]/q_norm;
+        }
+
+        double spin_vec_dot_e_vec_unit = dot3(spin_vec,e_vec)/e;
+        double spin_vec_dot_q_vec_unit = dot3(spin_vec,q_vec_unit);
+
+        Z_rot = C*c_1div2*j_p4_inv*(2.0*spin_vec_dot_h_vec_unit*spin_vec_dot_h_vec_unit - spin_vec_dot_q_vec_unit*spin_vec_dot_q_vec_unit - spin_vec_dot_e_vec_unit*spin_vec_dot_e_vec_unit);
+    }
     double Z_TB = C*15.0*n*n*(mu/M)*f_tides2;
 
     double Z = fabs(Z_rot + Z_TB);

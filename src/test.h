@@ -36,6 +36,7 @@ int test_binary_evolution_SNe_Ia_single_degenerate_model_1_white_dwarf_hydrogen_
 int test_mass_transfer_with_degenerate_objects_single_degenerate_model_1();
 int test_SNe_Ia_single_and_double_degenerate_model_1();
 int test_spin_conversion();
+int test_spin_rescale_zero_guard();
 int test_apsidal_motion_constant();
 int test_sse();
 int test_sse_specific_model(double m, double z, int *kw_final, double *m_init_final, double *m_final, double *R_final, double *ospin_final, double *L_final, double *m_core_final, double *m_env_final, double *epoch_final);
@@ -57,6 +58,8 @@ int test_mass_accretion_events_with_degenerate_objects_single_degenerate_model_1
 int test_compute_bse_mass_transfer_amount_averaged();
 int test_binary_common_envelope_evolution();
 int test_binary_evolution_emt_model_optimised_functions();
+int test_compute_q_crit_division_by_zero();
+int test_binary_evolution_operator_precedence();
 
 int test_collisions();
 
@@ -64,5 +67,9 @@ int test_collision_stars(double m1, int kw1, double m2, int kw2, int integration
 
 int test_triple_interactions();
 int test_triple_common_envelope_evolution();
+
+int test_logdata_empty_guard();
+int test_find_binaries_no_end_deref();
+int test_reset_interface();
 
 }

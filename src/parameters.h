@@ -57,6 +57,7 @@ extern double effective_radius_multiplication_factor_for_collisions_stars;
 extern double effective_radius_multiplication_factor_for_collisions_compact_objects;
 
 extern bool include_flybys;
+extern bool log_mstar_transitions;
 extern bool flybys_correct_for_gravitational_focussing;
 extern bool flybys_include_secular_encounters;
 extern int flybys_velocity_distribution;

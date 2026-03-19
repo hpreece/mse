@@ -64,7 +64,7 @@ class MSE(object):
         self.__MSTAR_include_PN_spin_Q = True
         
         self.__nbody_analysis_fractional_semimajor_axis_change_parameter = 0.01
-        self.__nbody_analysis_fractional_integration_time = 0.05
+        self.__nbody_analysis_fractional_integration_time = 0.1  # [P5.1] paper default=0.1; was 0.05
         self.__nbody_analysis_minimum_integration_time = 1.0e1
         self.__nbody_analysis_maximum_integration_time = 1.0e5
         self.__nbody_dynamical_instability_direct_integration_time_multiplier = 1.5
@@ -76,7 +76,7 @@ class MSE(object):
         self.__effective_radius_multiplication_factor_for_collisions_compact_objects = 1.0e2
         
         self.__binary_evolution_CE_energy_flag = 0
-        self.__binary_evolution_CE_spin_flag = 1
+        self.__binary_evolution_CE_spin_flag = 0  # [P5.1] paper default=0 (spins unaffected); was 1
         self.__binary_evolution_mass_transfer_timestep_parameter = 0.05
         self.__binary_evolution_CE_recombination_fraction = 1.0
         self.__binary_evolution_use_eCAML_model = False
@@ -110,6 +110,7 @@ class MSE(object):
         self.integration_flag = 0
         self.__stop_after_root_found = False
         self.__random_seed = 0
+        self._log_cache = None
         
         self.__verbose_flag = 0 ### 0: no verbose output in C++; > 0: verbose output, with increasing verbosity (>1 will slow down the code considerably)
         
@@ -118,6 +119,7 @@ class MSE(object):
         self.enable_VRR = False
         
         self.__include_flybys = True
+        self.__log_mstar_transitions = True
         self.__flybys_correct_for_gravitational_focussing = True
         self.__flybys_include_secular_encounters = False
         self.__flybys_reference_binary = -1
@@ -195,7 +197,8 @@ class MSE(object):
         self.lib.set_stellar_evolution_properties.argtypes = (ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_int)
         self.lib.set_stellar_evolution_properties.restype = ctypes.c_int
 
-        self.lib.get_stellar_evolution_properties.argtypes = (ctypes.c_int,ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double))
+        # C42 fix: added missing m_dot_accretion_SD (double*) param
+        self.lib.get_stellar_evolution_properties.argtypes = (ctypes.c_int,ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double))
         self.lib.get_stellar_evolution_properties.restype = ctypes.c_int
 
         ### kicks ###
@@ -215,7 +218,8 @@ class MSE(object):
 
 
         ### orbital elements ###
-        self.lib.set_orbital_elements.argtypes = (ctypes.c_int,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_int)
+        # C44 fix: last param sample_orbital_phase_randomly is bool in C, was c_int
+        self.lib.set_orbital_elements.argtypes = (ctypes.c_int,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_double,ctypes.c_bool)
         self.lib.set_orbital_elements.restype = ctypes.c_int
 
         self.lib.get_orbital_elements.argtypes = (ctypes.c_int,ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),\
@@ -279,7 +283,8 @@ class MSE(object):
             ctypes.c_int, ctypes.c_int, \
             ctypes.c_int, \
             ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_double, ctypes.c_double, \
-            ctypes.c_double)
+            ctypes.c_double, \
+            ctypes.c_bool)
         self.lib.set_parameters.restype = ctypes.c_int
 
         self.__set_parameters_in_code() 
@@ -324,7 +329,8 @@ class MSE(object):
         self.lib.get_size_of_log_data.argtypes = ()
         self.lib.get_size_of_log_data.restype = ctypes.c_int
         
-        self.lib.get_log_entry_properties.argtypes = (ctypes.c_int,ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_int))
+        # C4/C41 fix: added missing eccentric_collision (int*) and eccentricity (double*) params
+        self.lib.get_log_entry_properties.argtypes = (ctypes.c_int,ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_double))
         self.lib.get_log_entry_properties.restype = ctypes.c_int
         
         self.lib.get_internal_index_in_particlesMap_log.argtypes = (ctypes.c_int,ctypes.c_int)
@@ -334,6 +340,7 @@ class MSE(object):
         self.lib.get_is_binary_log.restype = ctypes.c_bool
 
 
+        # C43 fix: added missing WD_He_layer_mass (double*) and m_dot_accretion_SD (double*) params
         self.lib.get_body_properties_from_log_entry.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_int), \
                     ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double), \
                     ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double), \
@@ -341,7 +348,8 @@ class MSE(object):
                     ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double), \
                     ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double), \
                     ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_double), \
-                    ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double))
+                    ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double), \
+                    ctypes.POINTER(ctypes.c_double),ctypes.POINTER(ctypes.c_double))
         self.lib.get_body_properties_from_log_entry.restype = ctypes.c_int
         
         self.lib.get_binary_properties_from_log_entry.argtypes = (ctypes.c_int,ctypes.c_int,ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_int),ctypes.POINTER(ctypes.c_int), \
@@ -464,6 +472,8 @@ class MSE(object):
             ctypes.byref(state),ctypes.byref(CVODE_flag),ctypes.byref(CVODE_error_code),ctypes.byref(integration_flag))
         output_time,hamiltonian,state,CVODE_flag,CVODE_error_code,integration_flag = output_time.value,hamiltonian.value,state.value,CVODE_flag.value,CVODE_error_code.value,integration_flag.value
 
+        self._invalidate_log_cache()
+
         ### compute energy error ###
         self.hamiltonian = hamiltonian
         if self.initial_hamiltonian == 0.0:
@@ -474,8 +484,8 @@ class MSE(object):
         ### update model time ###
         self.model_time = output_time
 
-        if (flag==99):
-            print('Error occurred during ODE integration; error code is {0}'.format(error_code))
+        if (error_code != 0):  # [H11] check evolve_interface return value (0=success, non-zero=error)
+            print('MSE: evolve_interface returned non-zero code {0}'.format(error_code))
 
         self.error_code = error_code
         self.CVODE_flag = CVODE_flag
@@ -584,8 +594,8 @@ class MSE(object):
         for index,particle in enumerate(self.particles):
             if particle.is_binary==True:
                 flag += self.lib.set_children(particle.index,particle.child1.index,particle.child2.index)
-        
-        flag = 0
+
+        # [H14] Do not reset flag to 0 here — accumulate errors from set_children
         for index,particle in enumerate(self.particles):
             flag += self.__update_particle_in_code(particle,set_instantaneous_perturbation_properties=set_instantaneous_perturbation_properties)
         return flag
@@ -715,7 +725,7 @@ class MSE(object):
                 particle.kick_distribution_5_v_km_s_NS = kick_distribution_5_v_km_s_NS.value
                 particle.kick_distribution_5_v_km_s_BH = kick_distribution_5_v_km_s_BH.value
                 particle.kick_distribution_5_sigma = kick_distribution_5_sigma.value
-                particle.kick_distribution_sigma_km_s_NS_ECN = kick_distribution_sigma_km_s_NS_ECSN.value
+                particle.kick_distribution_sigma_km_s_NS_ECSN = kick_distribution_sigma_km_s_NS_ECSN.value  # [C48/H13] fix typo: ECN → ECSN
 
                 mass_dot = ctypes.c_double(0.0)
                 flag = self.lib.get_mass_dot(particle.index,ctypes.byref(mass_dot))
@@ -802,7 +812,8 @@ class MSE(object):
             self.__NS_model, self.__ECSNe_model, \
             self.__system_index, \
             self.__binary_evolution_mass_transfer_model, self.__binary_evolution_SNe_Ia_single_degenerate_model, self.__binary_evolution_SNe_Ia_double_degenerate_model, self.__binary_evolution_SNe_Ia_double_degenerate_model_minimum_eccentricity_for_eccentric_collision, self.__binary_evolution_SNe_Ia_double_degenerate_model_minimum_primary_mass_CO_CO, \
-            self.__defining_upper_mass_for_sdB_formation)
+            self.__defining_upper_mass_for_sdB_formation, \
+            self.__log_mstar_transitions)
 
     def reset(self):
         self.__init__()
@@ -911,10 +922,16 @@ class MSE(object):
 
     def write_final_log_entry(self):
         self.lib.write_final_log_entry_interface(self.model_time, self.integration_flag)
+        self._invalidate_log_cache()
 
     @property
     def log(self):
-        return self.__get_log()
+        if self._log_cache is None:
+            self._log_cache = self.__get_log()
+        return self._log_cache
+
+    def _invalidate_log_cache(self):
+        self._log_cache = None
 
 
     ### Tests ###
@@ -1205,6 +1222,14 @@ class MSE(object):
     @include_flybys.setter
     def include_flybys(self, value):
         self.__include_flybys = value
+        self.__set_parameters_in_code()
+
+    @property
+    def log_mstar_transitions(self):
+        return self.__log_mstar_transitions
+    @log_mstar_transitions.setter
+    def log_mstar_transitions(self, value):
+        self.__log_mstar_transitions = value
         self.__set_parameters_in_code()
 
     @property
@@ -1709,7 +1734,7 @@ class Particle(object):
             VRR_eta_20_init=0.0, VRR_eta_a_22_init=0.0, VRR_eta_b_22_init=0.0, VRR_eta_a_21_init=0.0, VRR_eta_b_21_init=0.0, \
             VRR_eta_20_final=0.0, VRR_eta_a_22_final=0.0, VRR_eta_b_22_final=0.0, VRR_eta_a_21_final=0.0, VRR_eta_b_21_final=0.0, \
             VRR_initial_time = 0.0, VRR_final_time = 1.0,roche_lobe_radius_pericenter=0.0, \
-            dynamical_mass_transfer_low_mass_donor_timescale=1.0e3, dynamical_mass_transfer_WD_donor_timescale=1.0e3, compact_object_disruption_mass_loss_timescale=1.0e3, common_envelope_alpha=1.0, common_envelope_lambda=1.0, common_envelope_timescale=1.0e3, triple_common_envelope_alpha=1.0, WD_He_layer_mass=0.0, m_dot_accretion_SD=0.0):
+            dynamical_mass_transfer_low_mass_donor_timescale=1.0e2, dynamical_mass_transfer_WD_donor_timescale=1.0e2, compact_object_disruption_mass_loss_timescale=1.0e2, common_envelope_alpha=1.0, common_envelope_lambda=1.0, common_envelope_timescale=1.0e2, triple_common_envelope_alpha=1.0, WD_He_layer_mass=0.0, m_dot_accretion_SD=0.0):  # [P5.1] mass-loss timescales: paper default=1e2 yr; was 1e3
                 
         ### spin_vec: nonzero spin_vec_z: need to specify a finite initial direction 
 
@@ -1825,7 +1850,7 @@ class Particle(object):
             self.mass_dot = mass_dot
             self.stellar_type = stellar_type
             self.object_type = object_type
-            self.sse_initial_mass = mass
+            self.sse_initial_mass = sse_initial_mass if sse_initial_mass is not None else mass  # [C46/H12]
             self.metallicity = metallicity
             self.sse_time_step = sse_time_step
             self.epoch = epoch
@@ -1919,13 +1944,17 @@ class Tools(object):
             print("mse.py -- arguments_of_pericentre not explicitly given -- setting initial arguments_of_pericentre to",arguments_of_pericentre)
      
     @staticmethod       
-    def create_fully_nested_multiple(N,masses,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,radii=None,metallicities=[],stellar_types=[],object_types=[]):
+    def create_fully_nested_multiple(N,masses,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,radii=None,metallicities=None,stellar_types=None,object_types=None):  # [C49] mutable defaults
 
         """
         N is number of bodies
         masses should be N-sized array
         the other arguments should be (N-1)-sized arrays
         """
+
+        if metallicities is None: metallicities = []
+        if stellar_types is None: stellar_types = []
+        if object_types is None: object_types = []
 
         N_bodies = N
         N_binaries = N-1
@@ -1960,13 +1989,17 @@ class Tools(object):
         return particles
 
     @staticmethod
-    def create_2p2_quadruple_system(masses,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,radii=None,metallicities=[],stellar_types=[],object_types=[]):
-        
+    def create_2p2_quadruple_system(masses,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,radii=None,metallicities=None,stellar_types=None,object_types=None):  # [C49] mutable defaults
+
         """
         Create a 2+2 quadruple system.
         Masses should contain the four masses.
         The other arguments should be length 3 arrays; first two entries: the two inner binaries; third entry: outer binary.
         """
+
+        if metallicities is None: metallicities = []
+        if stellar_types is None: stellar_types = []
+        if object_types is None: object_types = []
 
         N_bodies = 4
         N_binaries = N_bodies-1
@@ -2025,7 +2058,7 @@ class Tools(object):
                     return '', err
                 # variable to identify the '}' corresponding to '{'
                 proper_brkt = -1
-                for ind, char in enumerate(configuration):
+                for ind, char in enumerate(old_str):  # [C8] iterate over local parameter, not closure variable
                     if ind == first_left:
                         proper_brkt = 0
                         continue
@@ -2095,7 +2128,9 @@ class Tools(object):
         # convert parsed list [num,others] to basic [[1,...[1,1]],others] containg only ones
         def convert_to_ones(lst):
             # fullly nested hierachy if input is int
-            if type(lst) == int:            
+            if type(lst) == int:
+                if lst == 1:  # [C7] base case: single body
+                    return 1
                 for i in range(lst):
                     if i == 0:
                         continue
@@ -2106,8 +2141,8 @@ class Tools(object):
                 lst = sub_lst
             else:
                 for ind, elem in enumerate(lst):
-                    if type(elem) == list:  
-                        elem = convert_to_ones(elem)
+                    if type(elem) == list:
+                        lst[ind] = convert_to_ones(elem)  # [C7] propagate recursive result
                     elif elem == 1:
                         continue
                     elif type(elem) == int:
@@ -2194,7 +2229,11 @@ class Tools(object):
             exit()
 
     @staticmethod
-    def create_hierarchy(N_bodies,configuration,masses,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,radii=None,metallicities=[],stellar_types=[],object_types=[]):
+    def create_hierarchy(N_bodies,configuration,masses,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,radii=None,metallicities=None,stellar_types=None,object_types=None):  # [C49] mutable defaults
+
+        if metallicities is None: metallicities = []
+        if stellar_types is None: stellar_types = []
+        if object_types is None: object_types = []
 
         Tools.check_for_default_values(N_bodies,metallicities,stellar_types,object_types,inclinations,longitudes_of_ascending_node,arguments_of_pericentre)
 
@@ -2358,7 +2397,10 @@ class Tools(object):
                             parent = particle_2.parent
                      
     @staticmethod
-    def evolve_system(configuration,N_bodies,masses,metallicities,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,tend,N_steps,stellar_types=[],make_plots=True,fancy_plots=False,plot_filename="test1",show_plots=True,object_types=[],random_seed=0,verbose_flag=0,include_WD_kicks=False,kick_distribution_sigma_km_s_WD=1.0,NS_model=0,ECSNe_model=0,kick_distribution_sigma_km_s_NS=265.0,kick_distribution_sigma_km_s_BH=50.0,flybys_stellar_density_per_cubic_pc=0.1,flybys_encounter_sphere_radius_au=1.0e5,flybys_stellar_relative_velocity_dispersion_km_s=30.0,flybys_include_secular_encounters=False,include_flybys=True,save_data=False,plot_only=False,wall_time_max_s=3.6e4,common_envelope_timescale=1.0e3,binary_evolution_SNe_Ia_single_degenerate_model=0,binary_evolution_SNe_Ia_double_degenerate_model=0,effective_radius_multiplication_factor_for_collisions_compact_objects=100.,effective_radius_multiplication_factor_for_collisions_stars=1.0,tides_viscous_time_scale_prescription=1):
+    def evolve_system(configuration,N_bodies,masses,metallicities,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,tend,N_steps,stellar_types=None,make_plots=True,fancy_plots=False,plot_filename="test1",show_plots=True,object_types=None,random_seed=0,verbose_flag=0,include_WD_kicks=False,kick_distribution_sigma_km_s_WD=1.0,NS_model=0,ECSNe_model=0,kick_distribution_sigma_km_s_NS=265.0,kick_distribution_sigma_km_s_BH=50.0,flybys_stellar_density_per_cubic_pc=0.1,flybys_encounter_sphere_radius_au=1.0e5,flybys_stellar_relative_velocity_dispersion_km_s=30.0,flybys_include_secular_encounters=False,include_flybys=True,save_data=False,plot_only=False,wall_time_max_s=3.6e4,common_envelope_timescale=1.0e2,binary_evolution_SNe_Ia_single_degenerate_model=0,binary_evolution_SNe_Ia_double_degenerate_model=0,effective_radius_multiplication_factor_for_collisions_compact_objects=100.0,effective_radius_multiplication_factor_for_collisions_stars=1.0,tides_viscous_time_scale_prescription=1):  # [C49] mutable defaults
+
+        if stellar_types is None: stellar_types = []
+        if object_types is None: object_types = []
 
         np.random.seed(random_seed)
         
@@ -2372,6 +2414,7 @@ class Tools(object):
                 exit(0)
 
             log_copy = data["log"]
+            error_code_copy = data.get("error_code", 0)  # [C6] ensure error_code_copy is defined in plot_only path
 
             N_orbits_status = data['N_orbits_status']
             N_bodies_status = data['N_bodies_status']
@@ -2414,7 +2457,7 @@ class Tools(object):
             print("Eccentricities: ",eccentricities)
             print("Inclinations (rad): ",inclinations)
             print("Longitudes of the ascending node (rad): ",longitudes_of_ascending_node)
-            print("Arguments of periapsis (rad): ",inclinations)
+            print("Arguments of periapsis (rad): ",arguments_of_pericentre)  # [C51] was printing inclinations
             print("Integration time (yr): ",tend)
             print("Number of plot output steps: ",N_steps)
 
@@ -2492,17 +2535,84 @@ class Tools(object):
             i = 0
            
             Python_wall_start = time.time()
-            
+
+            error_code = 0
+            log_copy_for_save = []
+            log_snapshot = []
+
+            error_code_descriptions = {
+                -35: "Python-side wall time exceeded",
+                -1: "segmentation fault",
+                0: "no error",
+                1: "tools.cpp -- check_number() (NaN or INF)",
+                2: "binary_evolution.cpp -- handle_wind_accretion()",
+                3: "binary_evolution.cpp -- handle_mass_transfer_cases()",
+                4: "binary_evolution.cpp -- dynamical_mass_transfer_WD_donor()",
+                5: "binary_evolution.cpp -- triple_stable_mass_transfer_evolution()",
+                6: "collision.cpp -- collision_product()",
+                7: "collision.cpp -- handle_collisions()",
+                8: "common_envelope_evolution.cpp -- triple_common_envelope_evolution()",
+                9: "nbody_evolution.cpp -- handle_collisions_nbody()",
+                10: "ODE_mass_changes.cpp -- ODE_handle_RLOF_triple_mass_transfer()",
+                11: "ODE_mass_changes.cpp -- ODE_handle_RLOF_triple_mass_transfer()",
+                12: "ODE_mass_changes.cpp -- compute_RLOF_emt_model()",
+                13: "SNe.cpp -- sample_kick_velocity()",
+                14: "flybys.cpp -- sample_next_flyby()",
+                15: "flybys.cpp -- sample_flyby_position_and_velocity_at_R_enc()",
+                16: "flybys.cpp -- sample_flyby_mass_at_infinity()",
+                17: "stellar_evolution.cpp -- initialize_stars()",
+                18: "structure.cpp -- check_system_for_dynamical_stability()",
+                19: "ODE_newtonian.cpp -- compute_EOM_binary_pairs()",
+                20: "ODE_newtonian.cpp -- compute_EOM_binary_pairs_single_averaged()",
+                21: "ODE_newtonian.cpp -- compute_EOM_binary_triplets()",
+                22: "ODE_tides.cpp -- compute_EOM_equilibrium_tide_BO_full()",
+                23: "ODE_root_finding.cpp -- roche_radius_pericenter_sepinsky()",
+                24: "ODE_root_finding.cpp -- handle_roots()",
+                25: "apsidal_motion_constant.cpp -- compute_apsidal_motion_constant()",
+                26: "external.cpp -- compute_EOM_binary_pairs_external_perturbation()",
+                27: "mst.c -- die()",
+                28: "mst.c -- initialize_mpi_or_serial()",
+                29: "mst.c -- check_relative_proximity()",
+                30: "mst.c -- compute_U()",
+                31: "mst.c -- stopping_condition_function()",
+                32: "mst.c -- check_for_initial_stopping_condition()",
+                33: "ODE_VRR.cpp -- compute_VRR_perturbations()",
+                34: "tools.cpp -- sample_from_Kroupa_93_imf()",
+                35: "ODE_system.cpp -- wall time exceeded",
+                36: "mst.c -- wall time exceeded",
+                37: "stellar_evolution.cpp -- determine_sse_compact_object_radius_RSun()",
+                38: "stellar_evolution.cpp -- compute_moment_of_inertia()",
+                39: "common_envelope_evolution.cpp -- binary_common_envelope_evolution() -- zero core mass",
+                40: "SSE evolv1.f -- radius convergence error",
+                41: "SSE evolv1.f -- timestep convergence error",
+                42: "binary_evolution.cpp -- white_dwarf_helium_mass_accumulation_efficiency()",
+                43: "binary_evolution.cpp -- determine_if_He_accreting_WD_explodes()",
+            }
+
             while t<tend:
 
                 t+=dt
                 code.evolve_model(t)
-                
+
+                ### Snapshot log immediately after evolve_model returns ###
+                ### (before error checking, since wall-time break skips the end-of-loop snapshot) ###
+                try:
+                    if len(code.log) > len(log_snapshot):
+                        log_snapshot = copy.deepcopy(code.log)
+                except Exception as e:
+                    print("WARNING -- mse.py -- failed to snapshot log after evolve_model: {}".format(e))
+
                 ### check for errors/wall time ###
                 error_code = code.error_code
                 if error_code not in [0,35,36]:
+                    error_desc = error_code_descriptions.get(error_code, "unknown error")
                     print("="*50)
-                    print("WARNING -- mse.py -- Internal error with code ",error_code,"occurred -- -- stopping the simulation but saving data/making plots if specified in command line arguments.")
+                    print("WARNING -- mse.py -- Internal error with code ",error_code,"occurred -- stopping the simulation but saving data/making plots if specified in command line arguments.")
+                    print("  Error description: ", error_desc)
+                    print("  Time of error: t = {:.6g} Myr".format(t*1.0e-6))
+                    print("  Initial masses (MSun): ", masses)
+                    print("  Initial semimajor axes (AU): ", semimajor_axes)
+                    print("  Initial eccentricities: ", eccentricities)
                     print("="*50)
                     break
 
@@ -2577,33 +2687,34 @@ class Tools(object):
                     T_eff_print[i_status][index].append(T_eff)
                     spin_frequency_print[i_status][index].append( np.sqrt( bodies[index].spin_vec_x**2 + bodies[index].spin_vec_y**2 + bodies[index].spin_vec_z**2) )
 
-                t_print[i_status].append(t)        
+                t_print[i_status].append(t)
                 integration_flags[i_status].append(code.integration_flag)
 
                 i += 1
 
-            code.write_final_log_entry() ### This has to be done within Python, since the C++ code does not know if the desired Python simulation end time has been reached!
-
             N_status = i_status+1
-            
+
             for i_status in range(N_status):
                 t_print[i_status] = np.array(t_print[i_status])
 
-            print("Final properties -- ","masses/MSun",[m_print[-1][i][-1] for i in range(N_bodies)],"smas/au",[a_print[-1][i][-1] for i in range(N_orbits)],"es",[e_print[-1][i][-1] for i in range(N_orbits)])
+            try:
+                print("Final properties -- ","masses/MSun",[m_print[-1][i][-1] for i in range(N_bodies)],"smas/au",[a_print[-1][i][-1] for i in range(N_orbits)],"es",[e_print[-1][i][-1] for i in range(N_orbits)])
+            except (IndexError, TypeError):
+                print("Final properties -- unable to print (data arrays may be empty)")
 
-            if verbose_flag > 0:
-                print("Number of log entries:",len(code.log))
-                print("log",code.log)
-                
-            error_code_copy = copy.deepcopy(code.error_code)
-            log_copy = copy.deepcopy(code.log)
-
-            code.reset()
+            # Use the incrementally-captured log snapshot (safe Python-side copy)
+            # This avoids calling into C++ which may be corrupted after wall-time longjmp
+            log_copy = log_snapshot
+            log_copy_for_save = log_snapshot
+            error_code_copy = error_code
 
             if save_data==True: ### save code log and custom output data to disk for later analysis/replotting
-                
+                ### NOTE: pkl is saved BEFORE write_final_log_entry() so that data is persisted even if
+                ### C++ state is corrupted (e.g. after wall-time longjmp). Trade-off: the pkl will not
+                ### contain the final log entry.
+
                 wall_time_s = time.time() - Python_wall_start
-                data = {"log":log_copy,'error_code':error_code_copy,"wall_time_s":wall_time_s}
+                data = {"log":log_copy_for_save,'error_code':error_code_copy,"wall_time_s":wall_time_s}
 
                 data['N_orbits_status'] = N_orbits_status
                 data['N_bodies_status'] = N_bodies_status
@@ -2623,15 +2734,28 @@ class Tools(object):
                 data['L_print'] = L_print
                 data['rel_INCL_print'] = rel_INCL_print
                 data['spin_frequency_print'] = spin_frequency_print
-                
+
                 import pickle
                 print("Saving output data to ",plot_filename + ".pkl")
                 try:
                     with open(plot_filename + ".pkl",'wb') as file:
-                        data = pickle.dump(data,file)
+                        pickle.dump(data,file)
                 except IOError:
                     print("Error saving output data to ",plot_filename + ".pkl; make sure the path exists and/or enough disk space is available.")
-                    exit(0)
+
+            try:
+                code.write_final_log_entry() ### This has to be done within Python, since the C++ code does not know if the desired Python simulation end time has been reached!
+            except Exception:
+                print("WARNING -- mse.py -- write_final_log_entry() failed (C++ state may be corrupted after wall time exceeded)")
+
+            if verbose_flag > 0:
+                try:
+                    print("Number of log entries:",len(code.log))
+                    print("log",code.log)
+                except Exception:
+                    print("WARNING -- mse.py -- could not print log (C++ state may be corrupted)")
+
+            code.reset()
             
         if make_plots==True:
             print("Making plots...") 
@@ -3183,6 +3307,10 @@ class Tools(object):
             text = "$\mathrm{RLOF\,WD\,donor}$"
         elif event_flag == 21:
             text = "$\mathrm{Entering\,LISA\,band}$"
+        elif event_flag == 22:
+            text = "$\mathrm{Start\,N\!-\!body}$"
+        elif event_flag == 23:
+            text = "$\mathrm{End\,N\!-\!body}$"
         else:
             text = ""
         return text

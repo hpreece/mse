@@ -71,11 +71,11 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                     {
                         if (f_root >= 0.0)
                         {
-                            P_p->secular_breakdown_has_occurred == true;
+                            P_p->secular_breakdown_has_occurred = true;
                         }
                         else
                         {
-                            P_p->secular_breakdown_has_occurred == false;
+                            P_p->secular_breakdown_has_occurred = false;
                         }
                     }
                 }
@@ -677,7 +677,7 @@ double roche_radius_pericenter_sepinsky(double rp, double q, double e, double f)
             double g_0 = 0.9978 - 0.1229*log_A - 0.1273*log_A*log_A;
             double g_1 = 0.001 + 0.02556*log_A;
             double g_2 = 0.0004 + 0.0021*log_A;
-            ratio = g_0 + g_1*log_q * g_2*log_q*log_q;
+            ratio = g_0 + g_1*log_q + g_2*log_q*log_q;
         }
         if (log_A >= 0.2)
         {

@@ -170,8 +170,20 @@ int sample_kick_velocity(Particle *p, double *vx, double *vy, double *vz)
             #endif
 
             vnorm = vnorm_NS * (1.0 - f_fallback);
+
+            /* H18: for BH remnants, scale kick velocity by M_NS/M_BH to conserve momentum
+             * (same prescription as kick_distribution==2); without this, NS kick speed is
+             * applied directly to a much heavier BH, which overestimates the kick. */
+            if (kw == 14)
+            {
+                double m_NS = p->kick_distribution_2_m_NS;
+                if (m_remnant > 0.0)
+                {
+                    vnorm *= m_NS / m_remnant;
+                }
+            }
         }
-        
+
         if (kick_distribution == 4) // Giacobbo & Mapelli prescription
         {
             vnorm = vnorm_NS * (((m_progenitor - m_remnant)/m_remnant) * (p->kick_distribution_4_m_NS/p->kick_distribution_4_m_ej)); // <m_NS=1.2>; <m_ej>=9.0

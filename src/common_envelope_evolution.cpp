@@ -206,12 +206,19 @@ void binary_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
 
     double EBINDI = M1 * (M1 - MC1)/(LAMB1 * R1);
 
+    /* H36: EORBI_total uses pre-CE total masses (M1, M2) for computing the equivalent
+     * circular orbit energy ECIRC.  EORBI may later be overridden to core masses (MC1,
+     * MC2) for the CEFLAG != 3 energy-budget convention -- see BSE / HTP02 -- but ECIRC
+     * must always be derived from the actual pre-CE orbit (total masses) to correctly
+     * represent the angular-momentum-equivalent circular orbit and to properly
+     * circularize eccentric orbits during CE. */
     double EORBI = M1 * M2/(2.0 * SEP); // use primary total mass and secondary total mass (HTP02 eq. 69)
+    double EORBI_total = EORBI;          // save pre-CE total-mass orbital energy for ECIRC
 
     /*
     * If the secondary star is also giant-like, add its envelope's energy.
     */
-    
+
     if (KW2 >= 2 and KW2 <= 9 and KW2 != 7)
     {
         EBINDI += M2 * (M2 - MC2) / (LAMB2 * R2);
@@ -228,10 +235,19 @@ void binary_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
             EORBI = MC1 * M2/(2.0 * SEP); // secondary is not a giant; use its total mass
         }
     }
-    
-    double ECIRC = EORBI/(1.0 - ECC*ECC); // Allow for an eccentric orbit.
 
-    double EORBF = EORBI + EBINDI/ALPHA1; // Calculate the final orbital energy without coalescence (HTP02 eq. 71).
+    /* H36: Use pre-CE total masses for ECIRC so the circularised-orbit baseline is
+     * physically correct.  ECIRC = energy of the circular orbit sharing the same
+     * angular momentum as the pre-CE eccentric orbit (with total masses M1, M2). */
+    double ECIRC = EORBI_total/(1.0 - ECC*ECC); // equivalent circular orbit energy (pre-CE total masses)
+
+    /* H36: Use ECIRC (not EORBI) as the initial-state baseline for the CE energy
+     * balance, matching the BSE reference (HTP02 eq. 71).  For a circular initial
+     * orbit (ECC = 0) ECIRC == EORBI_total and the formula reduces to the original.
+     * For eccentric orbits this correctly ensures that EORBF > ECIRC, so the post-CE
+     * orbit is always circularised (the eccentricity check at the end of this function
+     * will then set ECC = epsilon). */
+    double EORBF = ECIRC + EBINDI/ALPHA1; // Calculate the final orbital energy without coalescence (HTP02 eq. 71).
     double EBINDF;
 
     /* Generic variables */
@@ -331,8 +347,19 @@ void binary_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
                     {
                         double ospin;
                         compute_NS_formation_properties_Ye19_model(false, &ospin, &star1->magnetic_field_strength_gauss);
-                        rescale_vector(star1->spin_vec, ospin/norm3(star1->spin_vec));
-                        
+                        /* H37 (related): Guard against zero spin_vec before rescaling. */
+                        double spin_norm_ce1 = norm3(star1->spin_vec);
+                        if (spin_norm_ce1 > 0.0)
+                        {
+                            rescale_vector(star1->spin_vec, ospin/spin_norm_ce1);
+                        }
+                        else
+                        {
+                            star1->spin_vec[0] = 0.0;
+                            star1->spin_vec[1] = 0.0;
+                            star1->spin_vec[2] = ospin;
+                        }
+
                         star1->time_of_NS_formation = t;
                         star1->initial_NS_period_s = compute_spin_period_from_spin_angular_frequency(ospin) * yr_to_s;
                         star1->initial_magnetic_field_strength_gauss = star1->magnetic_field_strength_gauss;
@@ -488,15 +515,26 @@ void binary_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
                 {
                     star1->apply_kick = true;
                 }
-                
+
                 if (NS_model == 1)
                 {
                     if (KW1 == 13)
                     {
                         double ospin;
                         compute_NS_formation_properties_Ye19_model(false, &ospin, &star1->magnetic_field_strength_gauss);
-                        rescale_vector(star1->spin_vec, ospin/norm3(star1->spin_vec));
-                        
+                        /* H37 (related): Guard against zero spin_vec before rescaling. */
+                        double spin_norm_ce2 = norm3(star1->spin_vec);
+                        if (spin_norm_ce2 > 0.0)
+                        {
+                            rescale_vector(star1->spin_vec, ospin/spin_norm_ce2);
+                        }
+                        else
+                        {
+                            star1->spin_vec[0] = 0.0;
+                            star1->spin_vec[1] = 0.0;
+                            star1->spin_vec[2] = ospin;
+                        }
+
                         star1->time_of_NS_formation = t;
                         star1->initial_NS_period_s = compute_spin_period_from_spin_angular_frequency(ospin) * yr_to_s;
                         star1->initial_magnetic_field_strength_gauss = star1->magnetic_field_strength_gauss;
@@ -523,8 +561,19 @@ void binary_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
                     {
                         double ospin;
                         compute_NS_formation_properties_Ye19_model(false, &ospin, &star2->magnetic_field_strength_gauss);
-                        rescale_vector(star2->spin_vec, ospin/norm3(star2->spin_vec));
-                        
+                        /* H37 (related): Guard against zero spin_vec before rescaling. */
+                        double spin_norm_ce3 = norm3(star2->spin_vec);
+                        if (spin_norm_ce3 > 0.0)
+                        {
+                            rescale_vector(star2->spin_vec, ospin/spin_norm_ce3);
+                        }
+                        else
+                        {
+                            star2->spin_vec[0] = 0.0;
+                            star2->spin_vec[1] = 0.0;
+                            star2->spin_vec[2] = ospin;
+                        }
+
                         star2->time_of_NS_formation = t;
                         star2->initial_NS_period_s = compute_spin_period_from_spin_angular_frequency(ospin) * yr_to_s;
                         star2->initial_magnetic_field_strength_gauss = star2->magnetic_field_strength_gauss;
@@ -1028,7 +1077,18 @@ void binary_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
                         /* This block is entered if either of the original objects was a MSP, and the new object is also a NS */
                         double ospin;
                         compute_NS_formation_properties_Ye19_model(true, &ospin, &star1->magnetic_field_strength_gauss);
-                        rescale_vector(star1->spin_vec,ospin/norm3(star1->spin_vec));
+                        /* H37 (related): Guard against zero spin_vec before rescaling. */
+                        double spin_norm_msp = norm3(star1->spin_vec);
+                        if (spin_norm_msp > 0.0)
+                        {
+                            rescale_vector(star1->spin_vec, ospin/spin_norm_msp);
+                        }
+                        else
+                        {
+                            star1->spin_vec[0] = 0.0;
+                            star1->spin_vec[1] = 0.0;
+                            star1->spin_vec[2] = ospin;
+                        }
 
                         star1->time_of_NS_formation = t;
                         star1->initial_NS_period_s = compute_spin_period_from_spin_angular_frequency(ospin) * yr_to_s;
@@ -1167,12 +1227,14 @@ void triple_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
     double RC3 = star3->core_radius/CONST_R_SUN;
     double L3 = star3->luminosity/CONST_L_SUN;
     double M_env3,R_env3;
-    
+
     double age3 = star3->age * yr_to_Myr;
-    double *zpars3 = star3->zpars;    
+    double *zpars3 = star3->zpars;
 
     star_(&kw3, &M3_sse_init, &M3, &tm3, &tn3, tscls3, lums3, GB3, zpars3);
-    
+    M_env3 = star3->convective_envelope_mass;
+    R_env3 = star3->convective_envelope_radius/CONST_R_SUN;
+
     double fac = binary_evolution_CE_recombination_fraction;
     double M_envd3 = M_env3 / (M3 - MC3);
     double R_ZAMS3 = rzamsf_(&M3_sse_init);
@@ -1274,8 +1336,19 @@ void triple_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
             {
                 double ospin;
                 compute_NS_formation_properties_Ye19_model(false, &ospin, &star3->magnetic_field_strength_gauss);
-                rescale_vector(star3->spin_vec, ospin/norm3(star3->spin_vec));
-                
+                /* H37 (related): Guard against zero spin_vec before rescaling. */
+                double spin_norm_ce4 = norm3(star3->spin_vec);
+                if (spin_norm_ce4 > 0.0)
+                {
+                    rescale_vector(star3->spin_vec, ospin/spin_norm_ce4);
+                }
+                else
+                {
+                    star3->spin_vec[0] = 0.0;
+                    star3->spin_vec[1] = 0.0;
+                    star3->spin_vec[2] = ospin;
+                }
+
                 star3->time_of_NS_formation = t;
                 star3->initial_NS_period_s = compute_spin_period_from_spin_angular_frequency(ospin) * yr_to_s;
                 star3->initial_magnetic_field_strength_gauss = star3->magnetic_field_strength_gauss;

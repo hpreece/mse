@@ -702,8 +702,8 @@ void compute_EOM_binary_pairs_double_averaged(ParticlesMap *particlesMap, int in
         + A_hd*j_out_p11_inv*f12 + A_tc*j_out_p13_inv*g;
 
 
-    *hamiltonian = binary_pair_hamiltonian;
-    *KS_V = binary_pair_hamiltonian;
+    *hamiltonian += binary_pair_hamiltonian;
+    *KS_V += binary_pair_hamiltonian;
 
     if (compute_hamiltonian_only == true)
     {

@@ -35,12 +35,14 @@ def parse_arguments():
     parser.add_argument("--model",                           type=int,       dest="model",                        default=1,              help="")
     parser.add_argument("--name",                            type=str,       dest="name",                           default="run01",              help="")    
     parser.add_argument("--seed",                            type=int,       dest="seed",                           default=0,              help="")    
-    parser.add_argument("--N_MC",                            type=int,       dest="N_MC",                         default=10000,              help="")    
+    parser.add_argument("--N_MC",                            type=int,       dest="N_MC",                         default=1000,              help="")    
     parser.add_argument("--N_dir",                           type=int,       dest="N_dir",                         default=1000,              help="")    
     parser.add_argument("--istart",                          type=int,       dest="istart",                       default=0,              help="")    
     parser.add_argument("--iend",                            type=int,       dest="iend",                         default=1000000,              help="")    
     parser.add_argument("--logi",                            type=int,       dest="logi",                         default=0,              help="")    
     parser.add_argument("--logf",                            type=int,       dest="logf",                         default=17,              help="")
+    parser.add_argument("--verbose_flag",                    type=int,       dest="verbose_flag",                         default=1,              help="")    
+
     ### boolean arguments ###
     add_bool_arg(parser, 'plot',                            default=True,          help="Make plots")
     add_bool_arg(parser, 'debug',                           default=False,         help="debugging mode")

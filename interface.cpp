@@ -9,44 +9,58 @@
 
 extern "C"
 {
-    
+
+/* Monotonically increasing counter for particle indices (C2 fix).
+ * Using particlesMap.size() caused index collisions after deletions. */
+static int next_particle_index = 0;
 
 /*******************
 /* basic interface *
  ******************/
- 
+
 int add_particle(int *index, bool is_binary, bool is_external)
 {
-    *index = particlesMap.size();
+    *index = next_particle_index;
+    next_particle_index++;
 
     Particle *p = new Particle(*index, is_binary);
     particlesMap[*index] = p;
 
     p->is_external = is_external;
-       
+
     return 0;
 }
 
 int delete_particle(int index)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
-  
-    particlesMap.erase(index);
+
+    /* Free the Particle before erasing the map entry (C3 fix). */
+    Particle *p = it->second;
+    if (p->zpars_allocated == true)
+    {
+        delete[] p->zpars;
+    }
+    delete p;
+
+    particlesMap.erase(it);
 
     return 0;
 }
 
 int set_children(int index, int child1, int child2)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];
+    Particle *p = it->second;
     p->child1 = child1;
     p->child2 = child2;
     //printf("c1 %d c2 %d\n",child1,child2);
@@ -54,15 +68,16 @@ int set_children(int index, int child1, int child2)
 }
 int get_children(int index, int *child1, int *child2)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     *child1 = p->child1;
     *child2 = p->child2;
-    
+
     return 0;
 }
 
@@ -73,14 +88,15 @@ int get_number_of_particles()
 
 bool get_is_binary(int index)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     return p->is_binary;
-    
+
     //printf("get_is_binary i %d\n",index,
     //return 0;
 }
@@ -112,73 +128,82 @@ int get_internal_index_in_particlesMap(int absolute_index)
 
 int get_is_bound(int index, bool *is_bound)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle *p = particlesMap[index];
+
+    Particle *p = it->second;
     //printf("getisb %d %d\n",index,p->is_bound);
     *is_bound = p->is_bound;
-    
+
     return 0;
 }    
 
 int set_mass(int index, double mass)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];
+    Particle *p = it->second;
     p->mass = mass;
-    p->sse_initial_mass = mass;
-    
+    /* [H15] Do not overwrite sse_initial_mass here; it is set once during
+     * initialisation via set_stellar_evolution_properties and must remain
+     * the ZAMS mass for SSE track look-ups even after mass-loss events. */
+
     return 0;
 }
 int get_mass(int index, double *mass)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-    Particle *p = particlesMap[index];
+
+    Particle *p = it->second;
     *mass = p->mass;
     return 0;
 }
 int set_mass_transfer_terms(int index, bool include_mass_transfer_terms)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];
+    Particle *p = it->second;
     p->include_mass_transfer_terms = include_mass_transfer_terms;
-    
+
     return 0;
 }
 int get_mass_transfer_terms(int index, bool *include_mass_transfer_terms)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];
+    Particle *p = it->second;
     *include_mass_transfer_terms = p->include_mass_transfer_terms;
-    
+
     return 0;
 }
 int get_mass_dot(int index, double *mass_dot)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];
+    Particle *p = it->second;
     *mass_dot = p->mass_dot_wind + p->mass_dot_RLOF;
 
     return 0;
@@ -186,41 +211,44 @@ int get_mass_dot(int index, double *mass_dot)
 
 int set_radius(int index, double radius, double radius_dot)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
 
-    Particle * p = particlesMap[index];
+    Particle *p = it->second;
     p->radius = radius;
     p->radius_dot = radius_dot;
-    
+
     return 0;
 }
 int get_radius(int index, double *radius, double *radius_dot)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     *radius = p->radius;
     *radius_dot = p->radius_dot;
-    
+
     return 0;
 }
 int set_integration_method(int index, int integration_method, bool KS_use_perturbing_potential)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
 
-    Particle * p = particlesMap[index];
+    Particle *p = it->second;
     p->integration_method = integration_method;
     p->KS_use_perturbing_potential = KS_use_perturbing_potential;
-    
+
     return 0;
 }
 
@@ -232,12 +260,13 @@ int set_integration_method(int index, int integration_method, bool KS_use_pertur
 int set_orbital_vectors(int index, double e_vec_x, double e_vec_y, double e_vec_z, \
     double h_vec_x, double h_vec_y, double h_vec_z)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle *p = particlesMap[index];
+
+    Particle *p = it->second;
 
     p->e_vec[0] = e_vec_x;
     p->e_vec[1] = e_vec_y;
@@ -251,12 +280,13 @@ int set_orbital_vectors(int index, double e_vec_x, double e_vec_y, double e_vec_
 int get_orbital_vectors(int index, double *e_vec_x, double *e_vec_y, double *e_vec_z, \
     double *h_vec_x, double *h_vec_y, double *h_vec_z)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle *p = particlesMap[index];
+
+    Particle *p = it->second;
 
     *e_vec_x = p->e_vec[0];
     *e_vec_y = p->e_vec[1];
@@ -271,12 +301,13 @@ int get_orbital_vectors(int index, double *e_vec_x, double *e_vec_y, double *e_v
 int set_orbital_elements(int index, double semimajor_axis, double eccentricity, double true_anomaly, \
     double inclination, double argument_of_pericenter, double longitude_of_ascending_node, bool sample_orbital_phase_randomly)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
 
-    Particle * p = particlesMap[index];    
+    Particle *p = it->second;
     
     if (p->is_binary == false)
     {
@@ -304,12 +335,13 @@ int set_orbital_elements(int index, double semimajor_axis, double eccentricity, 
 int get_orbital_elements(int index, double *semimajor_axis, double *eccentricity, double *true_anomaly, \
     double *inclination, double *argument_of_pericenter, double *longitude_of_ascending_node)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];    
+
+    Particle *p = it->second;
     
     if (p->is_binary == false)
     {
@@ -332,23 +364,74 @@ int get_orbital_elements(int index, double *semimajor_axis, double *eccentricity
     return 0;
 }
 
+int set_true_anomaly(int index, double value)
+{
+    if (particlesMap.count(index) == 0)
+    {
+        return -1;
+    }
+
+    Particle *p = particlesMap[index];
+    p->true_anomaly = value;
+
+    return 0;
+}
+int get_true_anomaly(int index, double *value)
+{
+    if (particlesMap.count(index) == 0)
+    {
+        return -1;
+    }
+
+    Particle *p = particlesMap[index];
+    *value = p->true_anomaly;
+
+    return 0;
+}
+
+int set_sample_orbital_phases_randomly(int index, int value)
+{
+    if (particlesMap.count(index) == 0)
+    {
+        return -1;
+    }
+
+    Particle *p = particlesMap[index];
+    p->sample_orbital_phase_randomly = (bool)value;
+
+    return 0;
+}
+int get_sample_orbital_phases_randomly(int index, int *value)
+{
+    if (particlesMap.count(index) == 0)
+    {
+        return -1;
+    }
+
+    Particle *p = particlesMap[index];
+    *value = (int)p->sample_orbital_phase_randomly;
+
+    return 0;
+}
+
 int get_inclination_relative_to_parent_interface(int index, double *inclination_relative_to_parent)
 {
     get_inclination_relative_to_parent(&particlesMap,index,inclination_relative_to_parent);
-    
+
     return 0;
 }
 
 int get_level(int index, int *value)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     *value = p->level;
-    
+
     return 0;
 }
 
@@ -357,12 +440,13 @@ int set_stellar_evolution_properties(int index, int stellar_type, int object_typ
     double convective_envelope_mass, double convective_envelope_radius, double core_mass, double core_radius, double luminosity, double apsidal_motion_constant, double gyration_radius, double tides_viscous_time_scale, int tides_viscous_time_scale_prescription)
 {
     //printf("set_stellar_evolution_properties %g\n",metallicity);
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
 
-    Particle * p = particlesMap[index];
+    Particle *p = it->second;
     p->stellar_type = stellar_type;
     p->object_type = object_type;
     p->sse_initial_mass = sse_initial_mass;
@@ -382,15 +466,16 @@ int set_stellar_evolution_properties(int index, int stellar_type, int object_typ
     
     return 0;
 }
-int get_stellar_evolution_properties(int index, int *stellar_type, int *object_type, double *sse_initial_mass, double *metallicity, double *sse_time_step, double *epoch, double *age, 
+int get_stellar_evolution_properties(int index, int *stellar_type, int *object_type, double *sse_initial_mass, double *metallicity, double *sse_time_step, double *epoch, double *age,
     double *convective_envelope_mass, double *convective_envelope_radius, double *core_mass, double *core_radius, double *luminosity, double *apsidal_motion_constant, double *gyration_radius, double *tides_viscous_time_scale, double *roche_lobe_radius_pericenter, double *WD_He_layer_mass, double *m_dot_accretion_SD)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     *stellar_type = p->stellar_type;
     *object_type = p->object_type;
     *sse_initial_mass = p->sse_initial_mass;
@@ -408,7 +493,10 @@ int get_stellar_evolution_properties(int index, int *stellar_type, int *object_t
     *tides_viscous_time_scale = p->tides_viscous_time_scale;
     *WD_He_layer_mass = p->WD_He_layer_mass;
     *m_dot_accretion_SD = p->m_dot_accretion_SD;
-    
+
+    /* Default: N/A for binaries and unbound particles; overwritten below for bound bodies */
+    *roche_lobe_radius_pericenter = 0.0;
+
     if (p->is_binary == false) /* TO DO: streamline with same code in root_finding.cpp */
     {
         if (p->is_bound == true) /* only update parameters below for bodies in bound orbits */
@@ -447,12 +535,13 @@ int set_kick_properties(int index, int kick_distribution, bool include_WD_kicks,
     double kick_distribution_5_v_km_s_NS, double kick_distribution_5_v_km_s_BH, double kick_distribution_5_sigma, double kick_distribution_sigma_km_s_NS_ECSN)
 {
     //printf("set_kick_properties index %d kick_distribution %d kick_distribution_sigma %g\n",index,kick_distribution,kick_distribution_sigma);
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];
+    Particle *p = it->second;
     p->kick_distribution = kick_distribution;
     p->include_WD_kicks = include_WD_kicks;
     p->kick_distribution_sigma_km_s_NS = kick_distribution_sigma_km_s_NS;
@@ -472,12 +561,13 @@ int get_kick_properties(int index, int *kick_distribution, bool *include_WD_kick
     double *kick_distribution_5_v_km_s_NS, double *kick_distribution_5_v_km_s_BH, double *kick_distribution_5_sigma, double *kick_distribution_sigma_km_s_NS_ECSN)
 
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle *p = particlesMap[index];
+
+    Particle *p = it->second;
     *kick_distribution = p->kick_distribution;
     *include_WD_kicks = p->include_WD_kicks;
     *kick_distribution_sigma_km_s_NS = p->kick_distribution_sigma_km_s_NS;
@@ -497,7 +587,13 @@ int get_kick_properties(int index, int *kick_distribution, bool *include_WD_kick
 int set_binary_evolution_properties(int index, double dynamical_mass_transfer_low_mass_donor_timescale, double dynamical_mass_transfer_WD_donor_timescale, double compact_object_disruption_mass_loss_timescale, \
     double common_envelope_alpha, double common_envelope_lambda, double common_envelope_timescale, double triple_common_envelope_alpha)
 {
-    Particle *p = particlesMap[index];
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
+    {
+        return -1;
+    }
+
+    Particle *p = it->second;
     p->dynamical_mass_transfer_low_mass_donor_timescale = dynamical_mass_transfer_low_mass_donor_timescale;
     p->dynamical_mass_transfer_WD_donor_timescale = dynamical_mass_transfer_WD_donor_timescale;
     p->compact_object_disruption_mass_loss_timescale = compact_object_disruption_mass_loss_timescale;
@@ -511,7 +607,13 @@ int set_binary_evolution_properties(int index, double dynamical_mass_transfer_lo
 int get_binary_evolution_properties(int index, double *dynamical_mass_transfer_low_mass_donor_timescale, double *dynamical_mass_transfer_WD_donor_timescale, double *compact_object_disruption_mass_loss_timescale, \
     double *common_envelope_alpha, double *common_envelope_lambda, double *common_envelope_timescale, double *triple_common_envelope_alpha)
 {
-    Particle *p = particlesMap[index];
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
+    {
+        return -1;
+    }
+
+    Particle *p = it->second;
     *dynamical_mass_transfer_low_mass_donor_timescale = p->dynamical_mass_transfer_low_mass_donor_timescale;
     *dynamical_mass_transfer_WD_donor_timescale = p->dynamical_mass_transfer_WD_donor_timescale;
     *compact_object_disruption_mass_loss_timescale = p->compact_object_disruption_mass_loss_timescale;
@@ -529,12 +631,13 @@ int get_binary_evolution_properties(int index, double *dynamical_mass_transfer_l
 
 int set_instantaneous_perturbation_properties(int index, double delta_mass, double delta_X, double delta_Y, double delta_Z, double delta_VX, double delta_VY, double delta_VZ)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-    
-    Particle *p = particlesMap[index];
+
+    Particle *p = it->second;
 
     p->instantaneous_perturbation_delta_mass = delta_mass;
     p->instantaneous_perturbation_delta_X = delta_X;
@@ -554,12 +657,13 @@ int set_instantaneous_perturbation_properties(int index, double delta_mass, doub
 
 int set_external_particle_properties(int index, double external_t_ref, double e, double external_r_p, double INCL, double AP, double LAN)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];    
+    Particle *p = it->second;
     
     p->external_t_ref = external_t_ref;
     p->external_e = e;
@@ -585,12 +689,13 @@ int set_external_particle_properties(int index, double external_t_ref, double e,
 
 int set_spin_vector(int index, double spin_vec_x, double spin_vec_y, double spin_vec_z)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     p->spin_vec[0] = spin_vec_x;
     p->spin_vec[1] = spin_vec_y;
     p->spin_vec[2] = spin_vec_z;
@@ -599,27 +704,29 @@ int set_spin_vector(int index, double spin_vec_x, double spin_vec_y, double spin
 }
 int get_spin_vector(int index, double *spin_vec_x, double *spin_vec_y, double *spin_vec_z)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     *spin_vec_x = p->spin_vec[0];
     *spin_vec_y = p->spin_vec[1];
     *spin_vec_z = p->spin_vec[2];
-    
+
     return 0;
 }
 
 int set_spin_vector_dot(int index, double spin_vec_x_dot, double spin_vec_y_dot, double spin_vec_z_dot)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     p->spin_vec_x_dot = spin_vec_x_dot;
     p->spin_vec_y_dot = spin_vec_y_dot;
     p->spin_vec_z_dot = spin_vec_z_dot;
@@ -628,12 +735,13 @@ int set_spin_vector_dot(int index, double spin_vec_x_dot, double spin_vec_y_dot,
 }
 int get_spin_vector_dot(int index, double *spin_vec_x_dot, double *spin_vec_y_dot, double *spin_vec_z_dot)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     *spin_vec_x_dot = p->spin_vec_x_dot;
     *spin_vec_y_dot = p->spin_vec_y_dot;
     *spin_vec_z_dot = p->spin_vec_z_dot;
@@ -644,12 +752,13 @@ int get_spin_vector_dot(int index, double *spin_vec_x_dot, double *spin_vec_y_do
 
 int get_relative_position_and_velocity(int index, double *x, double *y, double *z, double *vx, double *vy, double *vz)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     *x = p->r_vec[0];
     *y = p->r_vec[1];
     *z = p->r_vec[2];
@@ -661,12 +770,13 @@ int get_relative_position_and_velocity(int index, double *x, double *y, double *
 }
 int get_absolute_position_and_velocity(int index, double *X, double *Y, double *Z, double *VX, double *VY, double *VZ)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//      return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     
     *X = p->R_vec[0];
     *Y = p->R_vec[1];
@@ -684,12 +794,13 @@ int get_absolute_position_and_velocity(int index, double *X, double *Y, double *
 
 int set_PN_terms(int index, bool include_pairwise_1PN_terms, bool include_pairwise_25PN_terms, bool include_spin_orbit_1PN_terms, bool exclude_1PN_precession_in_case_of_isolated_binary)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
 
-    Particle * p = particlesMap[index];
+    Particle *p = it->second;
     p->include_pairwise_1PN_terms = include_pairwise_1PN_terms;
     p->include_pairwise_25PN_terms = include_pairwise_25PN_terms;
     p->include_spin_orbit_1PN_terms = include_spin_orbit_1PN_terms;
@@ -699,12 +810,13 @@ int set_PN_terms(int index, bool include_pairwise_1PN_terms, bool include_pairwi
 }
 int get_PN_terms(int index, bool *include_pairwise_1PN_terms, bool *include_pairwise_25PN_terms, bool *include_spin_orbit_1PN_terms, bool *exclude_1PN_precession_in_case_of_isolated_binary)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     
     *include_pairwise_1PN_terms = p->include_pairwise_1PN_terms;
     *include_pairwise_25PN_terms = p->include_pairwise_25PN_terms;
@@ -721,12 +833,13 @@ int get_PN_terms(int index, bool *include_pairwise_1PN_terms, bool *include_pair
 
 int set_tides_terms(int index, bool include_tidal_friction_terms, int tides_method, bool include_tidal_bulges_precession_terms, bool include_rotation_precession_terms, double minimum_eccentricity_for_tidal_precession, bool exclude_rotation_and_bulges_precession_in_case_of_isolated_binary)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];
+    Particle *p = it->second;
     
     p->include_tidal_friction_terms = include_tidal_friction_terms;
     p->tides_method = tides_method;
@@ -741,12 +854,13 @@ int set_tides_terms(int index, bool include_tidal_friction_terms, int tides_meth
 }
 int get_tides_terms(int index, bool *include_tidal_friction_terms, int *tides_method, bool *include_tidal_bulges_precession_terms, bool *include_rotation_precession_terms, double *minimum_eccentricity_for_tidal_precession, bool *exclude_rotation_and_bulges_precession_in_case_of_isolated_binary)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
-  
-    Particle *p = particlesMap[index];
+
+    Particle *p = it->second;
     
     *include_tidal_friction_terms = p->include_tidal_friction_terms;
     *tides_method = p->tides_method;
@@ -769,13 +883,14 @@ int set_VRR_properties(int index, int VRR_model, int VRR_include_mass_precession
 	double VRR_initial_time, double VRR_final_time)
 {
 	
-	if (index > particlesMap.size())
+	ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];
-    
+    Particle *p = it->second;
+
     p->VRR_model = VRR_model;
     p->VRR_include_mass_precession = VRR_include_mass_precession;
 	p->VRR_mass_precession_rate = VRR_mass_precession_rate;
@@ -804,12 +919,13 @@ int set_VRR_properties(int index, int VRR_model, int VRR_include_mass_precession
 int set_root_finding_terms(int index, bool check_for_secular_breakdown, bool check_for_dynamical_instability, int dynamical_instability_criterion, int dynamical_instability_central_particle, double dynamical_instability_K_parameter,
     bool check_for_physical_collision_or_orbit_crossing, bool check_for_minimum_periapse_distance, double check_for_minimum_periapse_distance_value, bool check_for_RLOF_at_pericentre, bool check_for_RLOF_at_pericentre_use_sepinsky_fit, bool check_for_GW_condition, bool check_for_entering_LISA_band, double check_for_entering_LISA_band_critical_GW_frequency)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
 
-    Particle *p = particlesMap[index];
+    Particle *p = it->second;
     p->check_for_secular_breakdown = check_for_secular_breakdown;
     p->check_for_dynamical_instability = check_for_dynamical_instability;
     p->dynamical_instability_criterion = dynamical_instability_criterion;
@@ -828,12 +944,13 @@ int set_root_finding_terms(int index, bool check_for_secular_breakdown, bool che
 int get_root_finding_terms(int index, bool *check_for_secular_breakdown, bool *check_for_dynamical_instability, int *dynamical_instability_criterion, int *dynamical_instability_central_particle, double *dynamical_instability_K_parameter,
     bool *check_for_physical_collision_or_orbit_crossing, bool *check_for_minimum_periapse_distance, double *check_for_minimum_periapse_distance_value, bool *check_for_RLOF_at_pericentre, bool *check_for_RLOF_at_pericentre_use_sepinsky_fit, bool *check_for_GW_condition, bool *check_for_entering_LISA_band, double *check_for_entering_LISA_band_critical_GW_frequency)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
-  
-    Particle *p = particlesMap[index];
+
+    Particle *p = it->second;
     *check_for_secular_breakdown = p->check_for_secular_breakdown;
     *check_for_dynamical_instability = p->check_for_dynamical_instability;
     *dynamical_instability_criterion = p->dynamical_instability_criterion;
@@ -853,12 +970,13 @@ int get_root_finding_terms(int index, bool *check_for_secular_breakdown, bool *c
 /* retrieve root finding state */
 int set_root_finding_state(int index, bool secular_breakdown_has_occurred, bool dynamical_instability_has_occurred, bool physical_collision_or_orbit_crossing_has_occurred, bool minimum_periapse_distance_has_occurred, bool RLOF_at_pericentre_has_occurred, bool GW_condition_has_occurred, bool entering_LISA_band_has_occurred)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
 
     p->secular_breakdown_has_occurred = secular_breakdown_has_occurred;
     p->dynamical_instability_has_occurred = dynamical_instability_has_occurred;
@@ -872,12 +990,13 @@ int set_root_finding_state(int index, bool secular_breakdown_has_occurred, bool 
 }
 int get_root_finding_state(int index, bool *secular_breakdown_has_occurred, bool *dynamical_instability_has_occurred, bool *physical_collision_or_orbit_crossing_has_occurred, bool *minimum_periapse_distance_has_occurred, bool *RLOF_at_pericentre_has_occurred, bool *GW_condition_has_occurred, bool *entering_LISA_band_has_occurred)
 {
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
 
     *secular_breakdown_has_occurred = p->secular_breakdown_has_occurred;
     *dynamical_instability_has_occurred = p->dynamical_instability_has_occurred;
@@ -952,11 +1071,38 @@ int apply_user_specified_instantaneous_perturbation_interface()
 
 int reset_interface()
 {
+    /* H35: reset ALL global state so consecutive runs in the same process are isolated */
+
+    /* Clear per-run data */
     clear_particles(&particlesMap);
     clear_logdata(&logData);
 
+    /* Reset particle index counter */
+    next_particle_index = 0;
+
+    /* Reset RNG to a deterministic state using the current random_seed */
+    random_number_generator.seed(random_seed);
+
+    /* Reset flyby counters (accumulated over the previous run) */
+    flybys_N_enc = 0;
+    flybys_N_not_impulsive = 0;
+
+    /* Reset flyby timing and derived parameters computed during run setup */
     flybys_t_next_encounter = 0.0;
-        
+    flybys_W_max = 0.0;
+    flybys_total_encounter_rate_at_R_enc = 0.0;
+    flybys_stellar_density_at_R_enc = 0.0;
+    flybys_internal_mass = 0.0;
+    flybys_internal_semimajor_axis = 0.0;
+
+    /* Reset verbose flag and error state */
+    verbose_flag = 0;
+    error_code = 0;
+
+    /* Refresh wall-clock reference so timeout logic is relative to this reset,
+     * not to any previous run started in the same process. */
+    time(&wall_time_start);
+
     return 0;
 }
 
@@ -972,13 +1118,13 @@ int set_positions_and_velocities_interface()
 
 int get_de_dt(int index, double *de_dt)
 {
-
-    if (index > particlesMap.size())
+    ParticlesMapIterator it = particlesMap.find(index);
+    if (it == particlesMap.end())
     {
-//        return -1;
+        return -1;
     }
-  
-    Particle * p = particlesMap[index];
+
+    Particle *p = it->second;
     if (p->is_binary == false)
     {
         *de_dt = 0.0;
@@ -1004,8 +1150,10 @@ int set_constants(double CONST_G_, double CONST_C_, double CONST_MSUN_, double C
     
     CONST_C_LIGHT = CONST_C_;
     CONST_C_LIGHT_P2 = CONST_C_LIGHT*CONST_C_LIGHT;
-    CONST_C_LIGHT_P4 = CONST_C_LIGHT_P2*CONST_C_LIGHT_P2;
+    CONST_C_LIGHT_P3 = CONST_C_LIGHT_P2*CONST_C_LIGHT;
+    CONST_C_LIGHT_P4 = CONST_C_LIGHT_P3*CONST_C_LIGHT;
     CONST_C_LIGHT_P5 = CONST_C_LIGHT_P4*CONST_C_LIGHT;
+    CONST_C_LIGHT_P6 = CONST_C_LIGHT_P5*CONST_C_LIGHT;
 
     CONST_MSUN = CONST_MSUN_;
     CONST_R_SUN = CONST_R_SUN_;
@@ -1042,7 +1190,8 @@ int set_parameters(double relative_tolerance_, double absolute_tolerance_eccentr
     int NS_model_, int ECSNe_model_, \
     int system_index_, \
     int binary_evolution_mass_transfer_model_, int binary_evolution_SNe_Ia_single_degenerate_model_, int binary_evolution_SNe_Ia_double_degenerate_model_, double binary_evolution_SNe_Ia_double_degenerate_model_minimum_eccentricity_for_eccentric_collision_, double binary_evolution_SNe_Ia_double_degenerate_model_minimum_primary_mass_CO_CO_, \
-    double defining_upper_mass_for_sdB_formation_)
+    double defining_upper_mass_for_sdB_formation_, \
+    bool log_mstar_transitions_)
 {
     relative_tolerance = relative_tolerance_;
     absolute_tolerance_eccentricity_vectors = absolute_tolerance_eccentricity_vectors_;
@@ -1128,6 +1277,7 @@ int set_parameters(double relative_tolerance_, double absolute_tolerance_eccentr
     MSTAR_include_PN_spin_Q = MSTAR_include_PN_spin_Q_;
 
     stop_after_root_found = stop_after_root_found_;
+    log_mstar_transitions = log_mstar_transitions_;
     system_index = system_index_;
      //printf("set_parm %d %d \n",flybys_reference_binary,flybys_reference_binary_);
      //printf("PARAMS %g %g %d %d %d %d %d\n",relative_tolerance,absolute_tolerance_eccentricity_vectors,include_quadrupole_order_terms,include_octupole_order_binary_pair_terms,include_octupole_order_binary_triplet_terms,include_hexadecupole_order_binary_pair_terms,include_dotriacontupole_order_binary_pair_terms);
@@ -1172,6 +1322,9 @@ int unit_tests_interface(int mode)
     flag += test_stellar_evolution(mode);
     flag += test_binary_evolution();
     flag += test_triple_interactions();
+    flag += test_logdata_empty_guard();
+    flag += test_find_binaries_no_end_deref();
+    flag += test_reset_interface();
     if (mode == 1)
     {
         flag += test_collisions();
@@ -1263,6 +1416,10 @@ int get_size_of_log_data()
  
 int get_log_entry_properties(int log_index, double *time, int *event_flag, int *integration_flag, int *N_particles, int *index1, int *index2, int *binary_index, double *kick_speed_km_s, int *SNe_type, int *SNe_info, int *eccentric_collision, double *eccentricity)
 {
+    if (log_index < 0 || log_index >= (int)logData.size())
+    {
+        return -1;
+    }
     Log_type entry = logData[log_index];
     *time = entry.time;
     *event_flag = entry.event_flag;
@@ -1289,6 +1446,10 @@ int get_log_entry_properties(int log_index, double *time, int *event_flag, int *
  
 bool get_is_binary_log(int log_index, int particle_index)
 {
+    if (log_index < 0 || log_index >= (int)logData.size())
+    {
+        return false;
+    }
     Log_type entry = logData[log_index];
     ParticlesMap entry_particlesMap = entry.particlesMap;
     Particle *p = entry_particlesMap[particle_index];
@@ -1298,6 +1459,10 @@ bool get_is_binary_log(int log_index, int particle_index)
 
 int get_internal_index_in_particlesMap_log(int log_index, int absolute_index)
 {
+    if (log_index < 0 || log_index >= (int)logData.size())
+    {
+        return -1;
+    }
     Log_type entry = logData[log_index];
     ParticlesMap entry_particlesMap = entry.particlesMap;
 //    Particle *p = particlesMap[particle_index];
@@ -1324,9 +1489,13 @@ int get_internal_index_in_particlesMap_log(int log_index, int absolute_index)
 }
  
 int get_body_properties_from_log_entry(int log_index, int particle_index, int *parent, double *mass, double *radius, int *stellar_type, double *core_mass, double *sse_initial_mass, double *convective_envelope_mass, \
-    double *epoch, double *age, double *core_radius, double *convective_envelope_radius, double *luminosity, double *ospin, double *X, double *Y, double *Z, double *VX, double *VY, double *VZ, int *object_type, double *metallicity, 
+    double *epoch, double *age, double *core_radius, double *convective_envelope_radius, double *luminosity, double *ospin, double *X, double *Y, double *Z, double *VX, double *VY, double *VZ, int *object_type, double *metallicity,
     double *spin_vec_x, double *spin_vec_y, double *spin_vec_z, double *WD_He_layer_mass, double *m_dot_accretion_SD)
 {
+    if (log_index < 0 || log_index >= (int)logData.size())
+    {
+        return -1;
+    }
     Log_type entry = logData[log_index];
     ParticlesMap entry_particlesMap = entry.particlesMap;
     Particle *p = entry_particlesMap[particle_index];
@@ -1375,6 +1544,10 @@ int get_binary_properties_from_log_entry(int log_index, int particle_index, int 
 
     //printf("interface.cpp -- get_binary_properties_from_log_entry -- log_index %d particle_index %d\n",log_index, particle_index);
 
+    if (log_index < 0 || log_index >= (int)logData.size())
+    {
+        return -1;
+    }
     Log_type entry = logData[log_index];
     ParticlesMap entry_particlesMap = entry.particlesMap;
     Particle *p = entry_particlesMap[particle_index];

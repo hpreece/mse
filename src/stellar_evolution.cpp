@@ -157,8 +157,19 @@ int initialize_stars(ParticlesMap *particlesMap)
                 if (NS_model == 1)
                 {
                     compute_NS_formation_properties_Ye19_model(false, &ospin, &p->magnetic_field_strength_gauss);
-                    rescale_vector(p->spin_vec, ospin/norm3(p->spin_vec));
-                    
+                    /* H37 (related): Guard against zero spin_vec during initialization. */
+                    double spin_norm_init = norm3(p->spin_vec);
+                    if (spin_norm_init > 0.0)
+                    {
+                        rescale_vector(p->spin_vec, ospin/spin_norm_init);
+                    }
+                    else
+                    {
+                        p->spin_vec[0] = 0.0;
+                        p->spin_vec[1] = 0.0;
+                        p->spin_vec[2] = ospin;
+                    }
+
                     p->time_of_NS_formation = 0.0;
                     p->initial_NS_period_s = compute_spin_period_from_spin_angular_frequency(ospin) * yr_to_s;
                     p->initial_magnetic_field_strength_gauss = p->magnetic_field_strength_gauss;
@@ -262,30 +273,11 @@ int evolve_stars(ParticlesMap *particlesMap, double start_time, double end_time,
 {
     /* Go through all stars in the system and evolve them with SSE */
         
-    /* SSE global parameters that need to be set */
-    value1_.neta = 0.5;
-    value1_.bwind = 0.0;
-    value1_.hewind = 0.5;
-    value1_.mxns = 3.0;
-    value2_.alpha1 = 1.0;
-    value2_.lambda = 1.0;
-    value3_.idum = 0;
-    value4_.sigma = 190.0;
-    value4_.bhflag = 1;
-    //        value5_.beta = 0.0;
-    //        value5_.xi = 0.0;
-    //        value5_.acc2 = 0.0;
-    //        value5_.epsnov = 0.0;
-    //        value5_.eddfac = 0.0;
-    //        value5_.gamma = 0.0;
+    /* H38: SSE global constants are initialized once by initialize_stars(); do NOT
+     * reset them here on every call, as that would clobber any user-specified values.
+     * Only update ceflag (may change between runs via binary_evolution_CE_energy_flag)
+     * and clear the error code from the previous call. */
     flags_.ceflag = binary_evolution_CE_energy_flag;
-    flags_.tflag = 0;
-    flags_.ifflag = 0;
-    flags_.nsflag = 1;
-    flags_.wdflag = 1;
-    points_.pts1 = 0.05;
-    points_.pts2 = 0.01;
-    points_.pts3 = 0.02;
     sse_error_output_.sse_error_code = 0;
 
 
@@ -448,7 +440,56 @@ int evolve_stars(ParticlesMap *particlesMap, double start_time, double end_time,
                     {
                         ospin = 1.0;
                     }
-                    rescale_vector(p->spin_vec, ospin/ospin_old); /* update spin (scalar change only) */
+                    /* H37: When NS_model == 1 and forming a NS (kw == 13), the Ye19 model
+                     * block below sets the spin magnitude; applying the SSE spin here first
+                     * would cause a double update (SSE spin then Ye19 spin).  In that case we
+                     * only need to ensure spin_vec has a valid direction -- the Ye19 block will
+                     * set the correct magnitude.  For all other cases (BH, massless remnant,
+                     * or NS without Ye19 model) we apply the SSE spin as before (C17 fix). */
+                    bool skip_sse_spin = (kw == 13 && NS_model == 1);
+                    if (!skip_sse_spin)
+                    {
+                        /* C17: guard against division by zero when old spin magnitude is zero */
+                        if (ospin_old > 0.0)
+                        {
+                            rescale_vector(p->spin_vec, ospin/ospin_old); /* update spin (scalar change only) */
+                        }
+                        else if (ospin > 0.0)
+                        {
+                            /* Old spin was zero so spin_vec has no direction;
+                             * set spin parallel to parent orbital angular momentum */
+                            if (p->parent != -1)
+                            {
+                                Particle *parent_p = (*particlesMap)[p->parent];
+                                double h = norm3(parent_p->h_vec);
+                                if (h > 0.0)
+                                {
+                                    for (int i=0; i<3; i++)
+                                    {
+                                        p->spin_vec[i] = ospin * parent_p->h_vec[i] / h;
+                                    }
+                                }
+                                else
+                                {
+                                    /* Fallback: set spin along z-axis */
+                                    p->spin_vec[0] = 0.0;
+                                    p->spin_vec[1] = 0.0;
+                                    p->spin_vec[2] = ospin;
+                                }
+                            }
+                            else
+                            {
+                                /* No parent binary; set spin along z-axis */
+                                p->spin_vec[0] = 0.0;
+                                p->spin_vec[1] = 0.0;
+                                p->spin_vec[2] = ospin;
+                            }
+                        }
+                        /* else: both ospin and ospin_old are zero; leave spin_vec unchanged (already zero) */
+                    }
+                    /* else: Ye19 model will set spin magnitude below; spin direction is
+                     * preserved from the pre-collapse state (physically: NS spin axis
+                     * aligns with the progenitor's rotation axis). */
                     
                     *apply_SNe_effects = true;
                     
@@ -509,8 +550,23 @@ int evolve_stars(ParticlesMap *particlesMap, double start_time, double end_time,
                 {
                     if (NS_model == 1)
                     {
+                        /* H37: Only the Ye19 model sets the NS spin here (the SSE spin
+                         * update in the NS/BH block above was skipped when skip_sse_spin
+                         * was true).  Guard against a zero spin_vec in case the progenitor
+                         * had no spin; fall back to z-axis direction in that edge case. */
                         compute_NS_formation_properties_Ye19_model(false, &ospin, &p->magnetic_field_strength_gauss);
-                        rescale_vector(p->spin_vec, ospin/norm3(p->spin_vec));
+                        double spin_norm_ye19 = norm3(p->spin_vec);
+                        if (spin_norm_ye19 > 0.0)
+                        {
+                            rescale_vector(p->spin_vec, ospin/spin_norm_ye19);
+                        }
+                        else
+                        {
+                            /* Progenitor had zero spin; set NS spin along z-axis. */
+                            p->spin_vec[0] = 0.0;
+                            p->spin_vec[1] = 0.0;
+                            p->spin_vec[2] = ospin;
+                        }
                         p->time_of_NS_formation = end_time;
                         p->initial_NS_period_s = compute_spin_period_from_spin_angular_frequency(ospin) * yr_to_s;
                         p->initial_magnetic_field_strength_gauss = p->magnetic_field_strength_gauss;

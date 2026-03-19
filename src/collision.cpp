@@ -1295,12 +1295,16 @@ void determine_compact_object_merger_properties(double m1_, double m2_, double c
 double determine_effective_radius_for_collision(double radius, int stellar_type, int integration_flag)
 {
     double effective_radius = radius;
-    if (stellar_type < 13 and integration_flag > 0)
+    if (stellar_type < 10 and integration_flag > 0)
     {
         effective_radius = radius * effective_radius_multiplication_factor_for_collisions_stars;
     }
     else if (stellar_type >= 13)
     {
+        /* [P5.2] Apply enlarged collision radius only to NS (type 13) and BH (type 14).
+         * This is an intentional numerical fudge to prevent excessively long final inspirals
+         * during NS/BH mergers (computationally expensive). WDs (types 10-12) use their
+         * physical radii and must NOT have this factor applied. */
         effective_radius = radius * effective_radius_multiplication_factor_for_collisions_compact_objects;
     }
     

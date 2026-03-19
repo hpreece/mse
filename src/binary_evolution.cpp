@@ -170,9 +170,16 @@ double compute_q_crit_for_common_envelope_evolution(int kw, double mass, double 
     {
         q_crit = 4.0;
     }
-    else if (kw == 3 or kw == 5 or kw == 6) // Hjellming & Webbink, 1987, ApJ, 318, 794. 
+    else if (kw == 3 or kw == 5 or kw == 6) // Hjellming & Webbink, 1987, ApJ, 318, 794.
     {
-        q_crit = 0.362 + 1.0/(3.0 * (1.0 - core_mass/mass));
+        if (core_mass >= mass) /* Star is entirely core; q_crit diverges (C16). */
+        {
+            q_crit = 1.0e10;
+        }
+        else
+        {
+            q_crit = 0.362 + 1.0/(3.0 * (1.0 - core_mass/mass));
+        }
     }
     else if (kw == 8 or kw == 9)
     {
@@ -908,7 +915,7 @@ int binary_stable_mass_transfer_evolution(ParticlesMap *particlesMap, int parent
     double m_dot_Eddington = compute_Eddington_accretion_rate(R_accretor, hydrogen_mass_fraction);
     double dme = m_dot_Eddington * dt;
 
-    double taum = (m_accretor/dm1) * dt;
+    double taum = (dm1 != 0.0) ? (m_accretor/dm1) * dt : 1.0e100; /* Guard against dm1==0 (C15). */
     bool gntage_was_called = false;
     
     if (kw2 <= 2 or kw2 == 4)
@@ -1190,7 +1197,7 @@ int binary_stable_mass_transfer_evolution(ParticlesMap *particlesMap, int parent
     {
         donor->sse_initial_mass = m_donor_new;
     }
-    if (kw2 <= 1 or kw2 == 7 and gntage_was_called == false)
+    if ((kw2 <= 1 || kw2 == 7) && gntage_was_called == false) /* C14: explicit parentheses for correct precedence */
     {
         accretor->sse_initial_mass = m_accretor_new;
     }
@@ -1411,7 +1418,7 @@ void white_dwarf_helium_mass_accumulation_efficiency_KH04(double m_WD, double m_
     /* Based on Kato & Hachisu (2004; https://ui.adsabs.harvard.edu/abs/2004ApJ...613L.129K/abstract) */
     double log_m_dot = log10(m_dot); // Log 10 of Helium accretion rate
     
-    int KH04_WD_masses_length = 6;
+    const int KH04_WD_masses_length = 6;
     double KH04_WD_masses[KH04_WD_masses_length] = {0.8,0.9,1.0,1.2,1.3,1.35};
 
     int i,i_low,i_up;

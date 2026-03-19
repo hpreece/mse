@@ -445,18 +445,21 @@ void process_direct_integration_quantities(ParticlesMap *particlesMap, double de
             }
             else if (p->integration_method>0)
             {
-
-                from_cartesian_to_orbital_vectors(
-                    p->child1_mass,p->child2_mass,
-                    p->r_vec,p->v_vec,
-                    p->e_vec,p->h_vec,&p->true_anomaly);
-
+                /* [H17] For KS regularisation (method==1) extract r_vec/v_vec
+                 * from the KS state BEFORE converting to orbital vectors.
+                 * The previous order called from_cartesian_to_orbital_vectors
+                 * on stale r_vec/v_vec and then overwrote them. */
                 if (p->integration_method==1)
                 {
                     transform_alpha_beta_to_u_u_star(p->KS_alpha_vec,p->KS_beta_vec,p->KS_E,u_vec,u_star_vec);
                     transform_u_d0_to_r(u_vec,p->r_vec);
                     transform_u_star_to_v(u_vec,u_star_vec,p->KS_omega,p->v_vec);
                 }
+
+                from_cartesian_to_orbital_vectors(
+                    p->child1_mass,p->child2_mass,
+                    p->r_vec,p->v_vec,
+                    p->e_vec,p->h_vec,&p->true_anomaly);
             }
         }
     }
@@ -572,10 +575,20 @@ void extract_ODE_variables(ParticlesMap *particlesMap, N_Vector &y, double delta
                     #endif
 
                     double e_norm = norm3(p->e_vec);
-                    double e_overshoot = e_norm - 1.0;
+                    double e_new;
+                    if (e_norm < 2.0)
+                    {
+                        /* Small overshoot: bounce back (e.g. 1.05 -> 0.95) */
+                        e_new = 2.0 - e_norm;
+                    }
+                    else
+                    {
+                        /* Large overshoot: clamp to safe value */
+                        e_new = 1.0 - 1.0e-10;
+                    }
                     for (k_component=0; k_component<3; k_component++)
                     {
-                        p->e_vec[k_component] = fmod(1.0 - e_overshoot,1.0) * p->e_vec[k_component]/e_norm;
+                        p->e_vec[k_component] = e_new * p->e_vec[k_component]/e_norm;
                     }
 
                     #ifdef VERBOSE
@@ -991,10 +1004,20 @@ void extract_final_ODE_variables(ParticlesMap *particlesMap, N_Vector &y_out)
                     #endif
 
                     double e_norm = norm3(p->e_vec);
-                    double e_overshoot = e_norm - 1.0;
+                    double e_new;
+                    if (e_norm < 2.0)
+                    {
+                        /* Small overshoot: bounce back (e.g. 1.05 -> 0.95) */
+                        e_new = 2.0 - e_norm;
+                    }
+                    else
+                    {
+                        /* Large overshoot: clamp to safe value */
+                        e_new = 1.0 - 1.0e-10;
+                    }
                     for (k_component=0; k_component<3; k_component++)
                     {
-                        p->e_vec[k_component] = fmod(1.0 - e_overshoot,1.0) * p->e_vec[k_component]/e_norm;
+                        p->e_vec[k_component] = e_new * p->e_vec[k_component]/e_norm;
                     }
 
                     #ifdef VERBOSE

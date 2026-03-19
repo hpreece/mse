@@ -63,11 +63,16 @@ FHEADERS = src/sse/const_bse.h src/sse/zdata.h
 ### Compilation flags -- choose one of two options for CPPFLAGS ###
 ###################################################################
 
-### Default flags with optimisation and no debugging support
-CPPFLAGS = -fPIC -shared -O2 -lgfortran -Wno-comment -Wno-c++11-compat-deprecated-writable-strings -Wno-write-strings
+### Compile flags (used when building .o files)
+CFLAGS = -fPIC -O2 -Wno-comment
+CXXFLAGS = -fPIC -O2 -std=c++11 -Wno-comment -Wno-write-strings
 
-### Optional flags without optimisation and debugging support (significantly slower)
-#CPPFLAGS = -fPIC -shared -lgfortran -Wno-comment -Wno-c++11-compat-deprecated-writable-strings -Wno-write-strings -g
+### Link flags (used only when building libmse.so)
+LDFLAGS = -shared -lgfortran
+
+### Optional: without optimisation and with debugging support (significantly slower)
+#CXXFLAGS = -fPIC -std=c++11 -Wno-comment -Wno-write-strings -g
+#CFLAGS = -fPIC -Wno-comment -g
 
 
 ############################################
@@ -80,11 +85,11 @@ all: $(COBJ) libmse.so
 
 %.o: %.c $(CHEADERS)
 	@echo "Compiling C source file $< ..."
-	$(CXX) -c -o $@ $< $(CPPFLAGS)
+	$(CC) -c -o $@ $< $(CFLAGS)
 
 %.o: %.cpp $(CXXHEADERS)
 	@echo "Compiling C++ source file $< ..."
-	$(CXX) -c -o $@ $< $(CPPFLAGS)
+	$(CXX) -c -o $@ $< $(CXXFLAGS)
 
 %.o: %.f $(FHEADERS)
 	@echo "Compiling Fortran source file $< ..."
@@ -99,7 +104,7 @@ sse: $(FOBJ)
 libmse.so: $(COBJ) $(FOBJ)
 	@echo ""        
 	@echo "Linking shared library $@ ..."
-	$(CXX) -o $@ $(COBJ) $(FOBJ) $(CPPFLAGS)
+	$(CXX) -o $@ $(COBJ) $(FOBJ) -fPIC $(LDFLAGS)
 	@echo ""        
 	@echo "The shared library $@ has been created successfully."
 

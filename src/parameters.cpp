@@ -95,9 +95,10 @@ double wall_time_max_s = 3.6e4;
 double epsilon = 1.0e-12; /* used for tiny numbers close to machine precision */
 
 double effective_radius_multiplication_factor_for_collisions_stars = 1.0;
-double effective_radius_multiplication_factor_for_collisions_compact_objects = 1.0e2;
+double effective_radius_multiplication_factor_for_collisions_compact_objects = 1.0e2; /* [P5.2] 100x fudge factor for NS/BH mergers to limit inspiral wall-time; applied only to types 13-14 */
 
 bool include_flybys = true;
+bool log_mstar_transitions = true;
 bool flybys_correct_for_gravitational_focussing = true;
 bool flybys_include_secular_encounters = false;
 int flybys_velocity_distribution = 0;
@@ -123,7 +124,9 @@ double MSTAR_stopping_condition_tolerance = 1.0e-10;
 double MSTAR_output_time_tolerance = 1.0e-4;
 
 double nbody_analysis_fractional_semimajor_axis_change_parameter = 0.01;
-double nbody_analysis_fractional_integration_time = 0.05;
+/* [P5.1] nbody_analysis_fractional_integration_time: paper (Table 1, Sect. 2.1.2) documents
+ * default = 0.1; changed from 0.05 to 0.1 to match the published default. */
+double nbody_analysis_fractional_integration_time = 0.1;
 double nbody_analysis_minimum_integration_time = 1.0e1;
 double nbody_analysis_maximum_integration_time = 1.0e5;
 
@@ -134,7 +137,11 @@ double nbody_other_direct_integration_time_multiplier = 1.5;
 double nbody_maximum_separation_for_inclusion = 1.0e5;
  
 int binary_evolution_CE_energy_flag = 0;
-int binary_evolution_CE_spin_flag = 1;
+/* [P5.1] binary_evolution_CE_spin_flag: paper (Table 1) documents default=0 (spins unaffected);
+ * 0 = spins are not changed by CE event (conservative/default per paper)
+ * 1 = spins corotate and align with post-CE orbit
+ * Changed from 1 to 0 to match the published default. */
+int binary_evolution_CE_spin_flag = 0;
 int binary_evolution_CE_mass_loss_Nsteps = 100;
 double binary_evolution_CE_recombination_fraction = 1.0;
 double binary_evolution_mass_transfer_timestep_parameter = 0.05;

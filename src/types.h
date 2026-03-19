@@ -46,6 +46,8 @@ extern std::mt19937 random_number_generator; //Standard mersenne_twister_engine 
 #define LOG_DYN_MT_LOW_MASS_DONOR   (int)   19
 #define LOG_DYN_MT_WD_DONOR         (int)   20
 #define LOG_ENTER_LISA_BAND         (int)   21
+#define LOG_START_NBODY             (int)   22
+#define LOG_END_NBODY               (int)   23
 #endif
 
 
@@ -1192,9 +1194,11 @@ class Particle
         mass_dot_RLOF_triple = 0.0;
         triple_mass_transfer_a_in_dot = 0.0;
         
-        dynamical_mass_transfer_low_mass_donor_timescale = 1.0e3;
-        dynamical_mass_transfer_WD_donor_timescale = 1.0e3;
-        compact_object_disruption_mass_loss_timescale = 1.0e3;
+        /* [P5.1] Paper (Table 1, Sects. 2.6.3/2.6.4/2.8.3) documents default = 1e2 yr;
+         * changed from 1e3 to 1e2 to match the published defaults. */
+        dynamical_mass_transfer_low_mass_donor_timescale = 1.0e2;
+        dynamical_mass_transfer_WD_donor_timescale = 1.0e2;
+        compact_object_disruption_mass_loss_timescale = 1.0e2;
         
         accretion_disk_is_present = false;
         accretion_disk_r_min = 0.0;
@@ -1203,9 +1207,9 @@ class Particle
         RLOF_timescale = 0.0;
         
         /* CE */
-        common_envelope_alpha = 1.0;
+        common_envelope_alpha = 1.0/3.0; /* Zorotovic et al. (2010), Ge et al. (2024) */
         common_envelope_lambda = 1.0;
-        common_envelope_timescale = 1.0e3;
+        common_envelope_timescale = 1.0e2;  /* [P5.1] paper default = 1e2 yr; was 1e3 */
         triple_common_envelope_alpha = 1.0;
         
         /* kicks */

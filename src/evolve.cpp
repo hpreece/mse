@@ -132,6 +132,11 @@ int evolve(ParticlesMap *particlesMap, double start_time, double end_time, doubl
     int i=0;
     *state = 0;
     bool last_iteration = false;
+    int prev_integration_flag = *integration_flag;
+    double t_mstar_entry = 0.0;        // simulation time when MSTAR was entered
+    double t_last_mstar_log = 0.0;     // simulation time of last MSTAR log entry
+    double dt_last_mstar = 0.0;        // duration of last MSTAR phase
+    int mstar_suppressed_count = 0;    // count of suppressed MSTAR transitions
     while (t <= t_end)
     {
         t += dt;
@@ -161,26 +166,29 @@ int evolve(ParticlesMap *particlesMap, double start_time, double end_time, doubl
         t = t_out;
 
         #ifdef LOGGING
-        Log_type &last_entry = logData.back();
-        if (last_entry.event_flag == LOG_CE_START)
+        if (!logData.empty()) /* C20: guard against back() on empty logData */
         {
-            Log_info_type &last_log_info = last_entry.log_info;
-            Log_info_type log_info;
-            
-            log_info.binary_index = last_log_info.binary_index;
-            log_info.index1 = last_log_info.index1;
-            log_info.index2 = last_log_info.index2;
-            update_log_data(particlesMap, t, *integration_flag, LOG_CE_END, log_info);
-        }
-        if (last_entry.event_flag == LOG_COL_START)
-        {
-            Log_info_type &last_log_info = last_entry.log_info;
-            Log_info_type log_info;
+            Log_type &last_entry = logData.back();
+            if (last_entry.event_flag == LOG_CE_START)
+            {
+                Log_info_type &last_log_info = last_entry.log_info;
+                Log_info_type log_info;
 
-            log_info.binary_index = last_log_info.binary_index;
-            log_info.index1 = last_log_info.index1;
-            log_info.index2 = last_log_info.index2;
-            update_log_data(particlesMap, t, *integration_flag, LOG_COL_END, log_info);
+                log_info.binary_index = last_log_info.binary_index;
+                log_info.index1 = last_log_info.index1;
+                log_info.index2 = last_log_info.index2;
+                update_log_data(particlesMap, t, *integration_flag, LOG_CE_END, log_info);
+            }
+            if (last_entry.event_flag == LOG_COL_START)
+            {
+                Log_info_type &last_log_info = last_entry.log_info;
+                Log_info_type log_info;
+
+                log_info.binary_index = last_log_info.binary_index;
+                log_info.index1 = last_log_info.index1;
+                log_info.index2 = last_log_info.index2;
+                update_log_data(particlesMap, t, *integration_flag, LOG_COL_END, log_info);
+            }
         }
         #endif
 
@@ -277,6 +285,61 @@ int evolve(ParticlesMap *particlesMap, double start_time, double end_time, doubl
         
         
         #ifdef LOGGING
+        // Detect N-body transitions
+        if (log_mstar_transitions)
+        {
+        if (prev_integration_flag == 0 && *integration_flag > 0)
+        {
+            // Entering N-body
+            t_mstar_entry = t;
+
+            // Safeguard: suppress logging if switching rapidly
+            // Only suppress if time since last log < duration of last N-body phase
+            // AND time since last log < 1% of total integration time
+            bool suppress = (t_last_mstar_log > 0.0)
+                && (t - t_last_mstar_log < dt_last_mstar)
+                && (t - t_last_mstar_log < 0.01 * (end_time - start_time));
+
+            if (suppress)
+            {
+                mstar_suppressed_count++;
+            }
+            else
+            {
+                Log_info_type log_info;
+                log_info.index1 = mstar_suppressed_count; /* number of suppressed transitions since last logged entry */
+                update_log_data(particlesMap, t, *integration_flag, LOG_START_NBODY, log_info);
+                t_last_mstar_log = t;
+                mstar_suppressed_count = 0;
+            }
+        }
+        else if (prev_integration_flag > 0 && *integration_flag == 0)
+        {
+            // Leaving N-body
+            dt_last_mstar = t - t_mstar_entry;
+
+            bool suppress = (t_last_mstar_log > 0.0)
+                && (t - t_last_mstar_log < dt_last_mstar)
+                && (t - t_last_mstar_log < 0.01 * (end_time - start_time));
+
+            if (suppress)
+            {
+                mstar_suppressed_count++;
+            }
+            else
+            {
+                Log_info_type log_info;
+                log_info.index1 = mstar_suppressed_count; /* number of suppressed transitions since last logged entry */
+                update_log_data(particlesMap, t, *integration_flag, LOG_END_NBODY, log_info);
+                t_last_mstar_log = t;
+                mstar_suppressed_count = 0;
+            }
+        }
+        }
+        prev_integration_flag = *integration_flag;
+        #endif
+
+        #ifdef LOGGING
         if (logData.size() > 0)
         {
             Log_type last_entry = logData.back();
@@ -304,7 +367,7 @@ int evolve(ParticlesMap *particlesMap, double start_time, double end_time, doubl
     }
 
     *output_time = t;
-    *hamiltonian = 0.0;
+    /* *hamiltonian is already set by integrate_ODE_system; do not reset it here. */
 
     #ifdef VERBOSE
     if (verbose_flag > 1)
