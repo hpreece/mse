@@ -2397,7 +2397,7 @@ class Tools(object):
                             parent = particle_2.parent
                      
     @staticmethod
-    def evolve_system(configuration,N_bodies,masses,metallicities,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,tend,N_steps,stellar_types=None,make_plots=True,fancy_plots=False,plot_filename="test1",show_plots=True,object_types=None,random_seed=0,verbose_flag=0,include_WD_kicks=False,kick_distribution_sigma_km_s_WD=1.0,NS_model=0,ECSNe_model=0,kick_distribution_sigma_km_s_NS=265.0,kick_distribution_sigma_km_s_BH=50.0,flybys_stellar_density_per_cubic_pc=0.1,flybys_encounter_sphere_radius_au=1.0e5,flybys_stellar_relative_velocity_dispersion_km_s=30.0,flybys_include_secular_encounters=False,include_flybys=True,save_data=False,plot_only=False,wall_time_max_s=3.6e4,common_envelope_timescale=1.0e2,binary_evolution_SNe_Ia_single_degenerate_model=0,binary_evolution_SNe_Ia_double_degenerate_model=0,effective_radius_multiplication_factor_for_collisions_compact_objects=100.0,effective_radius_multiplication_factor_for_collisions_stars=1.0,tides_viscous_time_scale_prescription=1):  # [C49] mutable defaults
+    def evolve_system(configuration,N_bodies,masses,metallicities,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,tend,N_steps,stellar_types=None,make_plots=True,fancy_plots=False,plot_filename="test1",show_plots=True,object_types=None,random_seed=0,verbose_flag=0,include_WD_kicks=False,kick_distribution_sigma_km_s_WD=1.0,NS_model=0,ECSNe_model=0,kick_distribution_sigma_km_s_NS=265.0,kick_distribution_sigma_km_s_BH=50.0,flybys_stellar_density_per_cubic_pc=0.1,flybys_encounter_sphere_radius_au=1.0e5,flybys_stellar_relative_velocity_dispersion_km_s=30.0,flybys_include_secular_encounters=False,include_flybys=True,save_data=False,plot_only=False,wall_time_max_s=3.6e4,common_envelope_timescale=1.0e2,binary_evolution_SNe_Ia_single_degenerate_model=0,binary_evolution_SNe_Ia_double_degenerate_model=0,effective_radius_multiplication_factor_for_collisions_compact_objects=100.0,effective_radius_multiplication_factor_for_collisions_stars=1.0,tides_viscous_time_scale_prescription=1,dynamical_instability_criterion=0):  # [C49] mutable defaults
 
         if stellar_types is None: stellar_types = []
         if object_types is None: object_types = []
@@ -2474,6 +2474,10 @@ class Tools(object):
                 b.kick_distribution_sigma_km_s_BH = kick_distribution_sigma_km_s_BH
                 b.common_envelope_timescale = common_envelope_timescale
                 b.tides_viscous_time_scale_prescription = tides_viscous_time_scale_prescription
+
+            if dynamical_instability_criterion != 0:
+                for o in orbits:
+                    o.dynamical_instability_criterion = dynamical_instability_criterion
 
             N_bodies = len(bodies)
             N_orbits = len(orbits)
@@ -2758,62 +2762,87 @@ class Tools(object):
             code.reset()
             
         if make_plots==True:
-            print("Making plots...") 
-            
+            print("Making plots...")
+
             try:
                 from matplotlib import pyplot
                 from matplotlib import lines
+                import matplotlib
             except ImportError:
                 print("evolve_system.py -- ERROR: cannot import Matplotlib")
                 exit(-1)
-            
+
+            ### Font settings for mathtext ###
+            matplotlib.rcParams['mathtext.fontset'] = 'cm'
+            matplotlib.rcParams['font.family'] = 'serif'
+            matplotlib.rcParams['font.serif'] = ['DejaVu Serif', 'Computer Modern Roman']
+
             if fancy_plots == True:
                 print("Using LaTeX for plot text")
-                pyplot.rc('text',usetex=True)
-                pyplot.rc('legend',fancybox=True)  
-        
+                pyplot.rc('text', usetex=True)
+                pyplot.rc('legend', fancybox=True)
+
             parsec_in_AU = 206201.0
             CONST_L_SUN = 0.0002710404109745588
 
             plot_log = []
             previous_event_flag = -1
-            for index_log,log in enumerate(log_copy):
+            for index_log, log in enumerate(log_copy):
                 event_flag = log["event_flag"]
                 if previous_event_flag == event_flag and (event_flag == 4 or event_flag == 10):
-                    
+
                     continue
                 plot_log.append(log)
                 previous_event_flag = event_flag
-                            
+
             N_l = len(plot_log)
-            N_r = int(np.ceil(np.sqrt(N_l)))#+1
-            N_c = N_r
-            panel_length = 3
+            N_c = min(4, N_l)
+            N_r = int(np.ceil(N_l / max(N_c, 1)))
+            panel_w = 3.5
+            panel_h = 7.0
 
-            fontsize=10
-            fig=pyplot.figure(figsize=(N_r*panel_length,N_r*panel_length))
-            
+            fontsize = 20
+            fig = pyplot.figure(figsize=(N_c * panel_w, N_r * panel_h))
+
+            ### Build legend with updated markers and Roche lobe entries ###
             legend_elements = []
-            for k in range(15):
-                color,s,description = Tools.get_color_and_size_and_description_for_star(k,1.0)
-                legend_elements.append( lines.Line2D([0],[0], marker = 'o', markerfacecolor = color, color = 'w', markersize = 10 ,label="$\mathrm{%s}$"%description))
+            for k in range(16):
+                color, s, description, marker = Tools.get_color_and_size_and_description_for_star(k, 1.0, mass=1.0)
+                if description == '':
+                    continue
+                legend_elements.append(lines.Line2D([0], [0], marker='o', markerfacecolor=color,
+                                       color='w', markersize=10,
+                                       label=r"$\mathrm{%s}$" % description.replace(' ', r'\,')))
+            ### Roche filling legend entries ###
+            for rl_color, rl_label in [('green', r'$R/R_L < 0.5$'), ('gold', r'$0.5 \leq R/R_L < 0.8$'), ('red', r'$R/R_L \geq 0.8$')]:
+                legend_elements.append(lines.Line2D([0], [0], marker='o', markerfacecolor='none',
+                                       markeredgecolor=rl_color, markeredgewidth=1.5,
+                                       color='w', markersize=10, label=rl_label))
 
-            for index_log,log in enumerate(plot_log):
-                plot=fig.add_subplot(N_r,N_c,index_log+1)
+            for index_log, log in enumerate(plot_log):
+                plot = fig.add_subplot(N_r, N_c, index_log + 1)
+                plot.set_facecolor('white')
                 particles = log["particles"]
                 event_flag = log["event_flag"]
                 index1 = log["index1"]
                 index2 = log["index2"]
 
-                Tools.generate_mobile_diagram(particles,plot,fontsize=fontsize,index1=index1,index2=index2,event_flag=event_flag)
+                Tools.generate_mobile_diagram(particles, plot, fontsize=fontsize, index1=index1, index2=index2, event_flag=event_flag)
 
-                text = Tools.get_description_for_event_flag(event_flag,log["SNe_type"])
-                plot.set_title(text,fontsize=fontsize)
-                plot.annotate("$t\simeq %s\,\mathrm{Myr}$"%round(log["time"]*1e-6,2),xy=(0.1,0.9),xycoords='axes fraction',fontsize=fontsize)
+                ### Event name at top, timestamp at bottom ###
+                event_text = Tools.get_description_for_event_flag(event_flag, log["SNe_type"])
+                time_text = r"$t \simeq %s\,\mathrm{Myr}$" % round(log["time"] * 1e-6, 2)
+                plot.text(0.5, 1.01, event_text,
+                          transform=plot.transAxes, ha='center', va='bottom',
+                          fontsize=14, zorder=15)
+                plot.text(0.5, 0.01, time_text,
+                          transform=plot.transAxes, ha='center', va='bottom',
+                          fontsize=14, zorder=15)
 
                 if index_log == 0:
-                    plot.legend(handles = legend_elements, bbox_to_anchor = (-0.05, 1.50), loc = 'upper left', ncol = 5,fontsize=0.85*fontsize)
-                
+                    plot.legend(handles=legend_elements, bbox_to_anchor=(-0.05, 1.45), loc='upper left', ncol=5, fontsize=12, handletextpad=0.3, columnspacing=1.0)
+
+            fig.subplots_adjust(left=0.01, right=0.99, top=0.92, bottom=0.02, wspace=0.05, hspace=0.4)
             fig.savefig(plot_filename + "_mobile.pdf")
         
             fig=pyplot.figure(figsize=(8,10))
@@ -2874,24 +2903,24 @@ class Tools(object):
             
             for k,t in enumerate(t_CEs_Myr):
                 plot2.axvline(x=t,linestyle='dotted',color='tab:red',linewidth=0.5)
-                plot2.annotate("$\mathrm{CE}$",xy=(1.02*t,1.0e3),fontsize=0.8*fontsize)
-            
-            plot1.set_ylabel("$m/\mathrm{M}_\odot$",fontsize=fontsize)
-            plot2.set_ylabel("$r/\mathrm{au}$",fontsize=fontsize)
-            plot3.set_ylabel("$\mathrm{Stellar\,Type}$",fontsize=fontsize)
-            #plot4.set_ylabel("$\Omega_\mathrm{spin}/\mathrm{yr^{-1}}$",fontsize=fontsize)
-            plot4.set_ylabel("$P_\mathrm{spin}/\mathrm{s}$",fontsize=fontsize)
-            plot4.set_xlabel("$t/\mathrm{Myr}$",fontsize=fontsize)
+                plot2.annotate(r"$\mathrm{CE}$",xy=(1.02*t,1.0e3),fontsize=0.8*fontsize)
+
+            plot1.set_ylabel(r"$m/\mathrm{M}_\odot$",fontsize=fontsize)
+            plot2.set_ylabel(r"$r/\mathrm{au}$",fontsize=fontsize)
+            plot3.set_ylabel(r"$\mathrm{Stellar\,Type}$",fontsize=fontsize)
+            #plot4.set_ylabel(r"$\Omega_\mathrm{spin}/\mathrm{yr^{-1}}$",fontsize=fontsize)
+            plot4.set_ylabel(r"$P_\mathrm{spin}/\mathrm{s}$",fontsize=fontsize)
+            plot4.set_xlabel(r"$t/\mathrm{Myr}$",fontsize=fontsize)
             plot2.set_ylim(1.0e-5,1.0e5)
             
-            plot_pos.set_xlabel("$X/\mathrm{pc}$",fontsize=fontsize)
-            plot_pos.set_ylabel("$Y/\mathrm{pc}$",fontsize=fontsize)
+            plot_pos.set_xlabel(r"$X/\mathrm{pc}$",fontsize=fontsize)
+            plot_pos.set_ylabel(r"$Y/\mathrm{pc}$",fontsize=fontsize)
             plot_pos.tick_params(axis='both', which ='major', labelsize = labelsize,bottom=True, top=True, left=True, right=True)
             
 
             plot_HRD.set_xlim(5.0,3.0)
             plot_HRD.set_ylim(-4.0,6.0)
-            plot_HRD.set_xlabel("$\mathrm{log}_{10}(T_\mathrm{eff}/\mathrm{K})$",fontsize=fontsize)
+            plot_HRD.set_xlabel(r"$\mathrm{log}_{10}(T_\mathrm{eff}/\mathrm{K})$",fontsize=fontsize)
             plot_HRD.set_ylabel(r"$\mathrm{log}_{10}(L/L_\odot)$",fontsize=fontsize)
             plot_HRD.tick_params(axis='both', which ='major', labelsize = labelsize,bottom=True, top=True, left=True, right=True)
             
@@ -2909,408 +2938,577 @@ class Tools(object):
 
        
     @staticmethod
-    def generate_mobile_diagram(particles,plot,line_width_horizontal=1.5,line_width_vertical = 0.2,line_color = 'k',line_width = 1.5,fontsize=12,use_default_colors=True,index1=-1,index2=-1,event_flag=-1):
-        """
+    def generate_mobile_diagram(particles, plot, line_width_horizontal=1.5, line_width_vertical=1.2, line_color='k', line_width=3.0, fontsize=20, use_default_colors=True, index1=-1, index2=-1, event_flag=-1):
+        r"""
         Generate a Mobile diagram of a given multiple system.
         """
-        
+
         try:
             import matplotlib
+            import matplotlib.pyplot as plt
+            from matplotlib import cm
         except ImportError:
             print("mse.py -- generate_mobile_diagram -- unable to import Matplotlib which is needed to generate a Mobile diagram!")
             exit(0)
 
-        bodies = [x for x in particles if x.is_binary==False]
-        binaries = [x for x in particles if x.is_binary==True]
+        bodies = [x for x in particles if x.is_binary == False]
+        binaries = [x for x in particles if x.is_binary == True]
 
-        if len(binaries)==0:
-            if len(bodies)==0:
+        if len(binaries) == 0:
+            if len(bodies) == 0:
                 print("mse.py -- generate_mobile_diagram -- zero bodies and zero binaries!")
                 return
             else:
-                Tools.draw_bodies(plot,bodies,fontsize,index1=index1,index2=index2,event_flag=event_flag)
+                body_spacing = 4.0
+                Tools.draw_bodies(plot, bodies, fontsize, index1=index1, index2=index2, event_flag=event_flag)
+                ### Set axis limits for unbound-only panels ###
+                n_b = len(bodies)
+                x_pad = max(body_spacing * 0.6, 2.0)
+                plot.set_xlim([-x_pad, (n_b - 1) * body_spacing + x_pad])
+                plot.set_ylim([-1.5, 2.5])
+                plot.set_xticks([])
+                plot.set_yticks([])
+                for spine in plot.spines.values():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.5)
+                    spine.set_edgecolor('grey')
                 return
 
-        Tools.determine_binary_levels_in_particles(particles)                    
-        unbound_bodies = [x for x in particles if x.is_binary==False and x.parent == None]
-        if len(unbound_bodies)>0:
-            Tools.draw_bodies(plot,unbound_bodies,fontsize,y_ref = 1.5*line_width_vertical,dx=0.4*line_width_horizontal,dy=0.4*line_width_vertical,index1=index1,index2=index2,event_flag=event_flag)
-            
-        top_level_binaries = [x for x in binaries if x.level==0]
-        
-        for p in particles:
-            p.color = 'k'
-        
-        if use_default_colors==True:
-            ### Assign some colors from mcolors to the orbits ###
-            import matplotlib.colors as mcolors
-            colors = mcolors.TABLEAU_COLORS
-            color_names = list(colors)
-            
-            for index in range(len(binaries)):
-                color_name = color_names[index]
-                color=colors[color_name]
-            
-                o = binaries[index]
-                o.color = color
+        Tools.determine_binary_levels_in_particles(particles)
+        unbound_bodies = [x for x in particles if x.is_binary == False and x.parent is None]
+        if len(unbound_bodies) > 0:
+            Tools.draw_bodies(plot, unbound_bodies, fontsize, y_ref=1.5 * line_width_vertical, dx=0.8 * line_width_horizontal, dy=0.6 * line_width_vertical, index1=index1, index2=index2, event_flag=event_flag)
+
+        top_level_binaries = [x for x in binaries if x.level == 0]
+
+        ### Assign bone colormap colours to orbits (middle third) ###
+        orbit_cmap = cm.get_cmap('bone')
+        n_binaries = len(binaries)
+        binaries_sorted = sorted(binaries, key=lambda b: b.level)
+        for idx, b in enumerate(binaries_sorted):
+            if n_binaries == 1:
+                t = 0.5
+            else:
+                t = 0.33 + 0.34 * idx / (n_binaries - 1)
+            b.color = orbit_cmap(t)
+
+        ### Collect orbit info for top boxes ###
+        orbit_info_list = []
 
         ### Make mobile diagram ###
         top_x = 0.0
-        top_y = 0.0
-        
-        if len(top_level_binaries)>1: ### adjustments for two unbound subsystems
-            top_x = -3*line_width_horizontal
+        top_y = 0.0  # Tree starts at origin, grows downward
+
+        if len(top_level_binaries) > 1:
+            top_x = -3 * line_width_horizontal
             top_y = 0.0
-            
-        for index,top_level_binary in enumerate(top_level_binaries):
-        
-            top_level_binary.x = top_x - 5*index * line_width_horizontal
-            top_level_binary.y = top_y 
+
+        for index, top_level_binary in enumerate(top_level_binaries):
+
+            top_level_binary.x = top_x - 5 * index * line_width_horizontal
+            top_level_binary.y = top_y
 
             x_min = x_max = y_min = 0.0
             y_max = line_width_vertical
-    
-            plot.plot( [top_level_binary.x,top_level_binary.x], [top_level_binary.y,top_level_binary.y + line_width_vertical ], color=line_color,linewidth=line_width)
-            x_min,x_max,y_min,y_max = Tools.draw_binary_node(plot,top_level_binary,line_width_horizontal,line_width_vertical,line_color,line_width,fontsize,x_min,x_max,y_min,y_max,index1=index1,index2=index2,event_flag=event_flag)
+
+            ### No top stem — start directly at the binary node ###
+            x_min, x_max, y_min, y_max = Tools.draw_binary_node(plot, top_level_binary, line_width_horizontal, line_width_vertical, line_color, line_width, fontsize, x_min, x_max, y_min, y_max, index1=index1, index2=index2, event_flag=event_flag, orbit_info_list=orbit_info_list)
 
         plot.set_xticks([])
         plot.set_yticks([])
-        #print("minmax",x_min,x_max,y_min,y_max)
-        beta = 0.7
-        plot.set_xlim([x_min - beta*np.fabs(x_min),x_max + beta*np.fabs(x_max)])
-        plot.set_ylim([y_min - beta*np.fabs(y_min),1.5*y_max + beta*np.fabs(y_max)])
+
+        ### Extend limits to include unbound bodies if any ###
+        if len(unbound_bodies) > 0:
+            body_spacing = 4.0
+            ub_y = 1.5 * line_width_vertical
+            for ub_idx, ub in enumerate(unbound_bodies):
+                ub_x = ub_idx * body_spacing
+                if ub_x < x_min: x_min = ub_x
+                if ub_x > x_max: x_max = ub_x
+                if ub_y > y_max: y_max = ub_y
+
+        ### Padding: labels extend ~100pt below lowest star via offset points ###
+        x_range = max(x_max - x_min, 1.0)
+        y_range = max(y_max - y_min, 1.0)
+        x_pad = max(0.25 * x_range, 1.0)
+        y_pad_bottom = max(0.7 * y_range, 3.0)
+        n_orbits = len(orbit_info_list)
+        if n_orbits >= 3:
+            y_pad_top = max(0.6 * y_range, 3.5)
+        elif n_orbits == 2:
+            y_pad_top = max(0.3 * y_range, 2.0)
+        elif n_orbits == 1:
+            y_pad_top = max(0.2 * y_range, 1.2)
+        else:
+            y_pad_top = max(0.1 * y_range, 0.3)
+        plot.set_xlim([x_min - x_pad, x_max + x_pad])
+        plot.set_ylim([y_min - y_pad_bottom, y_max + y_pad_top])
+
+        for spine in plot.spines.values():
+            spine.set_visible(True)
+            spine.set_linewidth(0.5)
+            spine.set_edgecolor('grey')
+
+        ### Draw orbit parameter boxes ###
+        ### Always at the top of the panel ###
+        has_unbound = len(unbound_bodies) > 0
+        box_y = 0.97
+        box_va = 'top'
+        n_orbits = len(orbit_info_list)
+        if n_orbits > 0:
+            for i, info in enumerate(orbit_info_list):
+                a_val = info['a']
+                e_val = info['e']
+                orbit_color = info['color']
+                orbit_idx = info['orbit_index']
+
+                N_ra = 1 if a_val > 0.1 else 2
+                lines_text = r"$a_{%d} = %s\,\mathrm{au}$" % (orbit_idx, round(a_val, N_ra))
+                lines_text += "\n" + r"$e_{%d} = %.2f$" % (orbit_idx, e_val)
+                if 'i_rel' in info and info['i_rel'] is not None:
+                    lines_text += "\n" + r"$i_{%d} = %.0f^\circ$" % (orbit_idx, info['i_rel'])
+
+                ### All boxes in one row, evenly spaced ###
+                box_x_i = (i + 0.5) / n_orbits
+                box_ha = 'center'
+                if n_orbits >= 2:
+                    if i == 0:
+                        box_x_i = 0.02
+                        box_ha = 'left'
+                    elif i == n_orbits - 1:
+                        box_x_i = 0.98
+                        box_ha = 'right'
+
+                bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec=orbit_color, lw=2.0, alpha=0.85)
+                plot.text(box_x_i, box_y, lines_text, transform=plot.transAxes,
+                          ha=box_ha, va=box_va, fontsize=12,
+                          bbox=bbox_props, zorder=15)
         
         #plot.autoscale(enable=True,axis='both')
         
     @staticmethod
-    def draw_binary_node(plot,particle,line_width_horizontal,line_width_vertical,line_color,line_width,fontsize,x_min,x_max,y_min,y_max,index1=-1,index2=-1,event_flag=-1,i_rel=None):
+    def _total_mass(particle):
+        r"""Recursively compute total mass of a particle (body or binary subtree)."""
+        if not particle.is_binary:
+            return particle.mass
+        return Tools._total_mass(particle.child1) + Tools._total_mass(particle.child2)
+
+    @staticmethod
+    def draw_binary_node(plot, particle, line_width_horizontal, line_width_vertical, line_color, line_width, fontsize, x_min, x_max, y_min, y_max, index1=-1, index2=-1, event_flag=-1, i_rel=None, orbit_info_list=None, orbit_counter=None):
         CONST_MJUP = 0.000954248
-        
+        CONST_R_SUN = 0.004649130343817401
+        CONST_KM_PER_AU = 1.4966e8
+
+        if orbit_info_list is None:
+            orbit_info_list = []
+        if orbit_counter is None:
+            orbit_counter = [0]
+
         x = particle.x
         y = particle.y
-        
+
         child1 = particle.child1
         child2 = particle.child2
 
         from matplotlib.patches import Ellipse
 
-        N_ra = 1
-        if (particle.a<=0.1): N_ra = 2
-        if i_rel == None:
-            text = "$a\simeq \mathrm{%s\,au}$\n $e\simeq  %.2f$"%(round(particle.a,N_ra),particle.e)
-        else:
-            text = "$a\simeq \mathrm{%s\,au}$\n $e\simeq %.2f$ \n $i_\mathrm{rel} \simeq %.0f^\circ$"%(round(particle.a,N_ra),particle.e,i_rel)
-        x_plot = x - 0*0.8*line_width_horizontal
-        y_plot = y - 0.3*line_width_vertical
+        ### Orbit info collected AFTER children (so inner orbits get lower indices) ###
+        ### See below, after child handling ###
 
-        bbox_props = dict(boxstyle="round", pad=0.1, fc=particle.color, ec="k", lw=0.5,alpha=0.9)
-        plot.text(x_plot, y_plot, text, ha="center", va="center", rotation=0,
-            size=0.7*fontsize,
-            bbox=bbox_props,zorder=9)
-   
-        alpha = 1.0
+        ### Proportional arm length based on semi-major axis ###
+        ### Minimum alpha ensures sibling labels don't overlap horizontally ###
+        both_leaves = (not child1.is_binary) and (not child2.is_binary)
+        alpha = max(1.5, 0.8 + 0.3 * np.log10(max(particle.a, 0.01)))
         if child1.is_binary == True and child2.is_binary == True:
-            alpha = 3.5
+            alpha = max(alpha, 5.0)
+        elif child1.is_binary == True or child2.is_binary == True:
+            alpha = max(alpha, 3.0)  # wider so subtree labels don't overlap sibling body
+        elif both_leaves:
+            alpha = max(alpha, 2.2)  # room for side-by-side text blocks
 
-        if child1.is_binary == True and child2.is_binary == False:
-            alpha = 2.5
-        if child1.is_binary == False and child2.is_binary == True:
-            alpha = 2.5
+        orbit_color = particle.color
+
+        ### Node point at the junction ###
+        plot.scatter([x], [y], color=orbit_color, s=60, zorder=12, edgecolors='none')
 
         ### lines to child1 ###
-        plot.plot( [x,x - alpha*line_width_horizontal],[y,y], color=line_color,linewidth=line_width)
-        plot.plot( [x - alpha*line_width_horizontal,x - alpha*line_width_horizontal], [y,y - line_width_vertical], color=line_color,linewidth=line_width)
-        
+        plot.plot([x, x - alpha * line_width_horizontal], [y, y], color=orbit_color, linewidth=line_width)
+        plot.plot([x - alpha * line_width_horizontal, x - alpha * line_width_horizontal], [y, y - line_width_vertical], color=orbit_color, linewidth=line_width)
+
         ### lines to child2 ###
-        plot.plot( [x,x + alpha*line_width_horizontal],[y,y], color=line_color,linewidth=line_width)
-        plot.plot( [x + alpha*line_width_horizontal,x + alpha*line_width_horizontal], [y,y - line_width_vertical], color=line_color,linewidth=line_width)
+        plot.plot([x, x + alpha * line_width_horizontal], [y, y], color=orbit_color, linewidth=line_width)
+        plot.plot([x + alpha * line_width_horizontal, x + alpha * line_width_horizontal], [y, y - line_width_vertical], color=orbit_color, linewidth=line_width)
 
         ### positions of children ###
-        child1 = particle.child1
-        child2 = particle.child2
-        
-        child1.x = particle.x - alpha*line_width_horizontal
-        child2.x = particle.x + alpha*line_width_horizontal
+        child1.x = particle.x - alpha * line_width_horizontal
+        child2.x = particle.x + alpha * line_width_horizontal
 
         child1.y = particle.y - line_width_vertical
         child2.y = particle.y - line_width_vertical
 
+        if (child1.x < x_min): x_min = child1.x
+        if (child1.x > x_max): x_max = child1.x
+        if (child2.x < x_min): x_min = child2.x
+        if (child2.x > x_max): x_max = child2.x
 
-        if (child1.x<x_min): x_min = child1.x
-        if (child1.x>x_max): x_max = child1.x
-        if (child2.x<x_min): x_min = child2.x
-        if (child2.x>x_max): x_max = child2.x
+        if (child1.y < y_min): y_min = child1.y
+        if (child1.y > y_max): y_max = child1.y
+        if (child2.y < y_min): y_min = child2.y
+        if (child2.y > y_max): y_max = child2.y
 
-        if (child1.y<y_min): y_min = child1.y
-        if (child1.y>y_max): y_max = child1.y
-        if (child2.y<y_min): y_min = child2.y
-        if (child2.y>y_max): y_max = child2.y
-        
+        ### helper to draw a body (star) node ###
+        def _draw_body(child, other_child, x_label_offset_sign):
+            color, s, description, marker = Tools.get_color_and_size_and_description_for_star(child.stellar_type, child.radius, mass=child.mass)
+
+            ### Main star marker ###
+            plot.scatter([child.x], [child.y], c=[color], s=s, zorder=10,
+                         edgecolors='black', linewidth=2.0, alpha=0.8, marker=marker)
+
+            ### Roche lobe filling ring ###
+            try:
+                ### Eggleton (1983) formula for Roche lobe radius ###
+                m_child = child.mass
+                m_other = other_child.mass if not other_child.is_binary else Tools._total_mass(other_child)
+                if m_other > 0 and particle.a > 0:
+                    q = m_child / m_other
+                    q13 = q ** (1.0 / 3.0)
+                    q23 = q13 * q13
+                    rl_over_a = 0.49 * q23 / (0.6 * q23 + np.log(1.0 + q13))
+                    rp = particle.a * (1.0 - particle.e)
+                    rl = rl_over_a * rp
+                    r_star_au = child.radius
+                    fill_frac = r_star_au / rl if rl > 0 else 0.0
+
+                    if fill_frac < 0.5:
+                        ring_color = 'green'
+                    elif fill_frac < 0.8:
+                        ring_color = 'gold'
+                    else:
+                        ring_color = 'red'
+
+                    s_ring = min(s * 2.0, 1200)
+                    plot.scatter([child.x], [child.y], s=s_ring, facecolors='none',
+                                edgecolors=ring_color, linewidth=1.5, zorder=9, marker='o')
+            except (AttributeError, ZeroDivisionError):
+                pass
+
+            ### Star label: single text block below star ###
+            label_x = child.x
+            label_y = child.y
+
+            type_text = description
+            if getattr(child, 'object_type', 1) == 2:
+                mass_text = r"$%.1f\,M_\mathrm{J}$" % (child.mass / CONST_MJUP)
+            else:
+                mass_text = r"$%.2f\,M_\odot$" % child.mass
+            r_rsun = child.radius / CONST_R_SUN
+            if r_rsun < 0.001:
+                r_km = child.radius * CONST_KM_PER_AU
+                radius_text = r"$%.0f$ km" % r_km
+            else:
+                radius_text = r"$%.2f\,R_\odot$" % r_rsun
+
+            label_block = type_text + "\n" + mass_text + "\n" + radius_text
+            plot.annotate(label_block, xy=(label_x, label_y), xytext=(0, -24),
+                          textcoords='offset points', ha='center', va='top',
+                          color='k', fontsize=12, zorder=10, linespacing=1.4)
+
         ### handle children ###
         if child1.is_binary == True:
-            
-            if event_flag in [14]: ### Triple CE
-                ell = Ellipse(xy=[x,child1.y],width=2.0*(child2.x-child1.x),height=3.5*(y - child1.y),angle=0.0,color='tab:red',alpha=0.5)
+
+            if event_flag in [14]:  ### Triple CE
+                ell = Ellipse(xy=[x, child1.y], width=2.0 * (child2.x - child1.x), height=3.5 * (y - child1.y), angle=0.0, color='tab:red', alpha=0.5)
                 plot.add_artist(ell)
 
-            i_rel = Tools.compute_mutual_inclination(particle.INCL,child1.INCL,particle.LAN,child1.LAN) * (180.0/np.pi)
-            x_min,x_max,y_min,y_max = Tools.draw_binary_node(plot,child1,line_width_horizontal,line_width_vertical,line_color,line_width,fontsize,x_min,x_max,y_min,y_max,index1=index1,index2=index2,event_flag=event_flag,i_rel=i_rel)
+            i_rel_child = Tools.compute_mutual_inclination(particle.INCL, child1.INCL, particle.LAN, child1.LAN) * (180.0 / np.pi)
+            x_min, x_max, y_min, y_max = Tools.draw_binary_node(plot, child1, line_width_horizontal, line_width_vertical, line_color, line_width, fontsize, x_min, x_max, y_min, y_max, index1=index1, index2=index2, event_flag=event_flag, i_rel=i_rel_child, orbit_info_list=orbit_info_list, orbit_counter=orbit_counter)
         else:
-            color,s,description = Tools.get_color_and_size_and_description_for_star(child1.stellar_type,child1.radius)
-            plot.scatter([child1.x],[child1.y],color=color,s=s,zorder=10)
-            if child1.object_type == 2:
-                text = "$\mathrm{%s}\,\mathrm{M_J}$"%(str(round(child1.mass/CONST_MJUP,1)))    
-            else:
-                text = "$\mathrm{%s}$"%(str(round(child1.mass,2)))
-                
-            plot.annotate(text,xy=(child1.x - 0.6*line_width_horizontal,child1.y - 0.5*line_width_vertical),color='k',fontsize=fontsize,zorder=10)
-            
-            if event_flag in [4,6,8,14,19,20]:
+            _draw_body(child1, child2, -1)
 
-                if event_flag in [4,19,20] and child1.index == index1: ### RLOF
-                    ell = Ellipse(xy=[child1.x,child1.y],width=0.5*np.fabs(child2.x-child1.x),height=0.5*np.fabs(y - child1.y),angle=0.0,color='tab:orange',alpha=0.5)
-                    plot.add_artist(ell)
-                
-                if event_flag in [6] and child1.index == index1: ### CE
-                    ell = Ellipse(xy=[x,child1.y],width=1.5*np.fabs(child2.x-child1.x),height=1.5*np.fabs(y - child1.y),angle=0.0,color='tab:red',alpha=0.5)
+            if event_flag in [4, 6, 8, 14, 19, 20]:
+                if event_flag in [4, 19, 20] and child1.index == index1:  ### RLOF
+                    ell = Ellipse(xy=[child1.x, child1.y], width=0.5 * np.fabs(child2.x - child1.x), height=0.5 * np.fabs(y - child1.y), angle=0.0, color='tab:orange', alpha=0.5)
                     plot.add_artist(ell)
 
-                if child1.index in [index1,index2] or child2.index in [index1,index2]:
-                    plot.plot([child1.x,child2.x],[child1.y,child2.y],color='r',zorder=8)
+                if event_flag in [6] and child1.index == index1:  ### CE
+                    ell = Ellipse(xy=[x, child1.y], width=1.5 * np.fabs(child2.x - child1.x), height=1.5 * np.fabs(y - child1.y), angle=0.0, color='tab:red', alpha=0.5)
+                    plot.add_artist(ell)
+
+                if child1.index in [index1, index2] or child2.index in [index1, index2]:
+                    plot.plot([child1.x, child2.x], [child1.y, child2.y], color='r', zorder=8)
                     if child1.index == index1:
-                        plot.arrow(child1.x, child1.y, 0.5*(child2.x-child1.x), 0, head_width=0.08, head_length=0.3*np.fabs(child2.x-child1.x),zorder=9, color='r')
+                        plot.arrow(child1.x, child1.y, 0.5 * (child2.x - child1.x), 0, head_width=0.08, head_length=0.3 * np.fabs(child2.x - child1.x), zorder=9, color='r')
                     else:
-                        plot.arrow(child2.x, child2.y, -0.5*np.fabs(child2.x-child1.x), 0, head_width=0.08, head_length=0.1*np.fabs(child2.x-child1.x),zorder=9, color='r')
-            if event_flag in [2,12]:
+                        plot.arrow(child2.x, child2.y, -0.5 * np.fabs(child2.x - child1.x), 0, head_width=0.08, head_length=0.1 * np.fabs(child2.x - child1.x), zorder=9, color='r')
+            if event_flag in [2, 12]:
                 if child1.index == index1:
-                    plot.scatter([child1.x],[child1.y],color=color,s=3*s,zorder=9,marker='*')
+                    color, s, description, marker = Tools.get_color_and_size_and_description_for_star(child1.stellar_type, child1.radius, mass=child1.mass)
+                    plot.scatter([child1.x], [child1.y], color=color, s=3 * s, zorder=9, marker='*')
                 if child2.index == index1:
-                    plot.scatter([child2.x],[child2.y],color=color,s=3*s,zorder=9,marker='*')
-            
-            
-            
+                    color, s, description, marker = Tools.get_color_and_size_and_description_for_star(child2.stellar_type, child2.radius, mass=child2.mass)
+                    plot.scatter([child2.x], [child2.y], color=color, s=3 * s, zorder=9, marker='*')
+
         if child2.is_binary == True:
-            
-            if event_flag in [14]: ### Triple CE
-                ell = Ellipse(xy=[x,child2.y],width=2.0*(child2.x-child1.x),height=3.5*(y - child2.y),angle=0.0,color='tab:red',alpha=0.5)
+
+            if event_flag in [14]:  ### Triple CE
+                ell = Ellipse(xy=[x, child2.y], width=2.0 * (child2.x - child1.x), height=3.5 * (y - child2.y), angle=0.0, color='tab:red', alpha=0.5)
                 plot.add_artist(ell)
-            
-            i_rel = Tools.compute_mutual_inclination(particle.INCL,child2.INCL,particle.LAN,child2.LAN) * (180.0/np.pi)
-            x_min,x_max,y_min,y_max = Tools.draw_binary_node(plot,child2,line_width_horizontal,line_width_vertical,line_color,line_width,fontsize,x_min,x_max,y_min,y_max,index1=index1,index2=index2,event_flag=event_flag,i_rel=i_rel)
+
+            i_rel_child = Tools.compute_mutual_inclination(particle.INCL, child2.INCL, particle.LAN, child2.LAN) * (180.0 / np.pi)
+            x_min, x_max, y_min, y_max = Tools.draw_binary_node(plot, child2, line_width_horizontal, line_width_vertical, line_color, line_width, fontsize, x_min, x_max, y_min, y_max, index1=index1, index2=index2, event_flag=event_flag, i_rel=i_rel_child, orbit_info_list=orbit_info_list, orbit_counter=orbit_counter)
         else:
-            color,s,description = Tools.get_color_and_size_and_description_for_star(child2.stellar_type,child2.radius)
-            plot.scatter([child2.x],[child2.y],color=color,s=s,zorder=10)
+            _draw_body(child2, child1, 1)
 
-            if child2.object_type == 2:
-                text = "$\mathrm{%s}\,\mathrm{M_J}$"%(str(round(child2.mass/CONST_MJUP,1)))    
-            else:
-                text = "$\mathrm{%s}$"%(str(round(child2.mass,2)))
-
-            plot.annotate(text,xy=(child2.x - 0.3*line_width_horizontal,child2.y - 0.5*line_width_vertical),color='k',fontsize=fontsize,zorder=10)
-                
-            if event_flag in [4,6,8,14,19,20]:
-                if event_flag in [4,19,20] and child2.index == index1: ### RLOF
-                    ell = Ellipse(xy=[child2.x,child2.y],width=0.5*np.fabs(child2.x-child1.x),height=0.5*np.fabs(y - child1.y),angle=0.0,color='tab:orange',alpha=0.5)
-                    plot.add_artist(ell)
-                
-                if event_flag in [6] and child2.index == index1: ### CE
-                    ell = Ellipse(xy=[x,child1.y],width=1.5*np.fabs(child2.x-child1.x),height=1.5*np.fabs(y - child1.y),angle=0.0,color='tab:red',alpha=0.5)
+            if event_flag in [4, 6, 8, 14, 19, 20]:
+                if event_flag in [4, 19, 20] and child2.index == index1:  ### RLOF
+                    ell = Ellipse(xy=[child2.x, child2.y], width=0.5 * np.fabs(child2.x - child1.x), height=0.5 * np.fabs(y - child1.y), angle=0.0, color='tab:orange', alpha=0.5)
                     plot.add_artist(ell)
 
-                
-                if child1.index in [index1,index2] or child2.index in [index1,index2]:
-                    plot.plot([child1.x,child2.x],[child1.y,child2.y],color='r',zorder=8)
+                if event_flag in [6] and child2.index == index1:  ### CE
+                    ell = Ellipse(xy=[x, child1.y], width=1.5 * np.fabs(child2.x - child1.x), height=1.5 * np.fabs(y - child1.y), angle=0.0, color='tab:red', alpha=0.5)
+                    plot.add_artist(ell)
+
+                if child1.index in [index1, index2] or child2.index in [index1, index2]:
+                    plot.plot([child1.x, child2.x], [child1.y, child2.y], color='r', zorder=8)
                     if child1.index == index1:
-                        plot.arrow(child1.x, child1.y, 0.5*(child2.x-child1.x), 0, head_width=0.05, head_length=0.3*np.fabs(child2.x-child1.x),zorder=9, color='r')
+                        plot.arrow(child1.x, child1.y, 0.5 * (child2.x - child1.x), 0, head_width=0.05, head_length=0.3 * np.fabs(child2.x - child1.x), zorder=9, color='r')
                     else:
-                        plot.arrow(child2.x, child2.y, -0.5*np.fabs(child2.x-child1.x), 0, head_width=0.05, head_length=0.1*np.fabs(child2.x-child1.x),zorder=9, color='r')
+                        plot.arrow(child2.x, child2.y, -0.5 * np.fabs(child2.x - child1.x), 0, head_width=0.05, head_length=0.1 * np.fabs(child2.x - child1.x), zorder=9, color='r')
 
-            if event_flag in [2,12]:
+            if event_flag in [2, 12]:
                 if child1.index == index1:
-                    plot.scatter([child1.x],[child1.y],color=color,s=3*s,zorder=9,marker='*')
+                    color, s, description, marker = Tools.get_color_and_size_and_description_for_star(child1.stellar_type, child1.radius, mass=child1.mass)
+                    plot.scatter([child1.x], [child1.y], color=color, s=3 * s, zorder=9, marker='*')
                 if child2.index == index1:
-                    plot.scatter([child2.x],[child2.y],color=color,s=3*s,zorder=9,marker='*')
+                    color, s, description, marker = Tools.get_color_and_size_and_description_for_star(child2.stellar_type, child2.radius, mass=child2.mass)
+                    plot.scatter([child2.x], [child2.y], color=color, s=3 * s, zorder=9, marker='*')
 
-        return x_min,x_max,y_min,y_max
+        ### Collect orbit info AFTER children (inner orbits get lower indices) ###
+        orbit_counter[0] += 1
+        orbit_idx = orbit_counter[0]
+        info = {'a': particle.a, 'e': particle.e, 'color': particle.color, 'orbit_index': orbit_idx}
+        if i_rel is not None:
+            info['i_rel'] = i_rel
+        orbit_info_list.append(info)
+
+        return x_min, x_max, y_min, y_max
 
 
     @staticmethod
-    def draw_bodies(plot,bodies,fontsize,y_ref=1.0,dx=0.5,dy=0.5,index1=-1,index2=-1,event_flag=-1):
-        for index,body in enumerate(bodies):
-            color,s,description = Tools.get_color_and_size_and_description_for_star(body.stellar_type,body.radius)
-            body.plot_x = index
+    def draw_bodies(plot, bodies, fontsize, y_ref=1.0, dx=0.5, dy=0.5, index1=-1, index2=-1, event_flag=-1):
+        CONST_R_SUN = 0.004649130343817401
+        CONST_KM_PER_AU = 1.4966e8
+        CONST_MJUP = 0.000954248
+
+        body_spacing = 4.0  # horizontal spacing between unbound bodies
+        for index, body in enumerate(bodies):
+            bx = index * body_spacing
+            color, s, description, marker = Tools.get_color_and_size_and_description_for_star(body.stellar_type, body.radius, mass=body.mass)
+            body.plot_x = bx
             body.plot_y = y_ref
-            plot.scatter([index],[y_ref],color=color,s=s,zorder=10)
-            text = "$\mathrm{%s}$"%(str(round(body.mass,1)))
-            plot.annotate(text,xy=(index - dx,y_ref-dy),color='k',fontsize=fontsize)
-            
+            plot.scatter([bx], [y_ref], c=[color], s=s, zorder=10,
+                         edgecolors='black', linewidth=2.0, alpha=0.8, marker=marker)
+
+            if getattr(body, 'object_type', 1) == 2:
+                mass_text = r"$%.1f\,M_\mathrm{J}$" % (body.mass / CONST_MJUP)
+            else:
+                mass_text = r"$%.2f\,M_\odot$" % body.mass
+
+            type_text = description
+
+            r_rsun = body.radius / CONST_R_SUN
+            if r_rsun < 0.001:
+                r_km = body.radius * CONST_KM_PER_AU
+                radius_text = r"$%.0f$ km" % r_km
+            else:
+                radius_text = r"$R=%.2f\,R_\odot$" % r_rsun
+
+            label_block = type_text + "\n" + mass_text + "\n" + radius_text
+            plot.annotate(label_block, xy=(bx, y_ref), xytext=(0, -24),
+                          textcoords='offset points', ha='center', va='top',
+                          color='k', fontsize=12, zorder=10, linespacing=1.4)
+
             if body.index == index1:
-                if event_flag in [2,12]:
-                    plot.scatter([index],[y_ref],color=color,s=3*s,zorder=9,marker='*')
+                if event_flag in [2, 12]:
+                    plot.scatter([bx], [y_ref], color=color, s=3 * s, zorder=9, marker='*')
             try:
                 VX = body.VX
                 VY = body.VY
                 VZ = body.VZ
-                V = np.sqrt(VX**2 + VY**2 + VZ**2)
-                x = index
-                y = y_ref
-                Adx = 0.5*dx*VX/V
-                Ady = 0.5*dx*VY/V
-                plot.arrow(x, y, Adx, Ady,color=color,head_width=0.05, head_length=0.05)
+                V = np.sqrt(VX ** 2 + VY ** 2 + VZ ** 2)
+                by = y_ref
+                Adx = 0.5 * dx * VX / V
+                Ady = 0.5 * dx * VY / V
+                plot.arrow(bx, by, Adx, Ady, color=color, head_width=0.05, head_length=0.05)
             except AttributeError:
                 pass
 
-        event_bodies = [x for x in bodies if x.index in [index1,index2]]
-        if len(event_bodies)==2:
+        event_bodies = [x for x in bodies if x.index in [index1, index2]]
+        if len(event_bodies) == 2:
 
-            if event_flag in [4,6,8]:
-                child1=event_bodies[0]
-                child2=event_bodies[1]
+            if event_flag in [4, 6, 8]:
+                child1 = event_bodies[0]
+                child2 = event_bodies[1]
 
-                plot.plot([child1.plot_x,child2.plot_x],[child1.plot_y,child2.plot_y],color='r',zorder=8)
+                plot.plot([child1.plot_x, child2.plot_x], [child1.plot_y, child2.plot_y], color='r', zorder=8)
                 if child1.index == index1:
-                    plot.arrow(child1.plot_x, child1.plot_y, 0.5*(child2.plot_x-child1.plot_x), 0, head_width=0.05, head_length=0.1*np.fabs(child2.plot_x-child1.plot_x),zorder=9, color='r')
+                    plot.arrow(child1.plot_x, child1.plot_y, 0.5 * (child2.plot_x - child1.plot_x), 0, head_width=0.05, head_length=0.1 * np.fabs(child2.plot_x - child1.plot_x), zorder=9, color='r')
                 else:
-                    plot.arrow(child2.plot_x, child2.plot_y, -0.5*np.fabs(child2.plot_x-child1.plot_x), 0, head_width=0.05, head_length=0.1*np.fabs(child2.plot_x-child1.plot_x),zorder=9, color='r')
+                    plot.arrow(child2.plot_x, child2.plot_y, -0.5 * np.fabs(child2.plot_x - child1.plot_x), 0, head_width=0.05, head_length=0.1 * np.fabs(child2.plot_x - child1.plot_x), zorder=9, color='r')
 
-
-        plot.set_xlim([-2*dx,len(bodies)])
-        plot.set_ylim([y_ref-2*dy,y_ref+2*dy])
+        plot.set_xlim([-2 * dx, len(bodies)])
+        plot.set_ylim([y_ref - 2 * dy, y_ref + 2 * dy])
 
         plot.set_xticks([])
         plot.set_yticks([])
 
 
     @staticmethod
-    def get_color_and_size_and_description_for_star(stellar_type,radius):
-        if (stellar_type == 0): 
-            color='gold'
-            description = 'low-mass\, ' + 'MS'
-        elif (stellar_type == 1): 
-            color='gold'
+    def get_color_and_size_and_description_for_star(stellar_type, radius, mass=None):
+        import matplotlib.colors as mcolors
+
+        if (stellar_type == 0):
+            color = 'gold'
+            description = 'dM'
+        elif (stellar_type == 1):
+            color = 'gold'
             description = 'MS'
         elif (stellar_type == 2):
-            color='darkorange'
+            color = 'darkorange'
             description = 'HG'
         elif (stellar_type == 3):
-            color='firebrick'
+            color = 'firebrick'
             description = 'RGB'
         elif (stellar_type == 4):
-            color='darkorange'
+            color = 'darkorange'
             description = 'CHeB'
         elif (stellar_type == 5):
-            color='orangered'
+            color = 'orangered'
             description = 'EAGB'
         elif (stellar_type == 6):
-            color='crimson'
+            color = 'crimson'
             description = 'TPAGB'
         elif (stellar_type == 7):
-            color='royalblue'
+            color = 'royalblue'
             description = 'HeMS'
         elif (stellar_type == 8):
-            color='orangered'
+            color = 'orangered'
             description = 'HeHG'
         elif (stellar_type == 9):
-            color='crimson'
+            color = 'crimson'
             description = 'HeGB'
         elif (stellar_type == 10):
-            color='silver'
+            color = 'silver'
             description = 'HeWD'
         elif (stellar_type == 11):
-            color='silver'
+            color = 'silver'
             description = 'COWD'
         elif (stellar_type == 12):
-            color='silver'
+            color = 'silver'
             description = 'ONeWD'
         elif (stellar_type == 13):
-            color='gainsboro'
+            color = 'gainsboro'
             description = 'NS'
         elif (stellar_type == 14):
-            color='k'
+            color = 'k'
             description = 'BH'
-        else: 
+        elif (stellar_type == 15):
+            color = 'k'
+            description = 'MR'
+        else:
             color = 'k'
             description = ''
-        
 
-        CONST_R_SUN = 0.004649130343817401
-        CONST_KM = 1.0/(1.4966e9)
+        marker = 'o'
 
-        s = 5 + 50*np.log10(radius/CONST_R_SUN)
-        if (stellar_type == 0):
-            s = 5 + 2*np.log10(radius/CONST_R_SUN)
-        elif (stellar_type >= 7 and stellar_type <= 9):
-            s = 5 + 5*np.log10(radius/CONST_KM)
-        elif (stellar_type >= 10):
-            s = 5 + 20*np.log10(radius/CONST_KM)
+        if stellar_type == 15:
+            s = 40
+            marker = 'x'
+        elif stellar_type == 10:
+            s = 60
+            rgb = mcolors.to_rgb(color)
+            color = tuple(min(1.0, c + 0.3) for c in rgb)
+        elif stellar_type == 11:
+            s = 70
+        elif stellar_type == 12:
+            s = 80
+            rgb = mcolors.to_rgb(color)
+            color = tuple(max(0.0, c - 0.2) for c in rgb)
+        elif stellar_type == 13:
+            s = 50
+        elif stellar_type == 14:
+            s = 60
+        else:
+            m = mass if mass is not None else 1.0
+            s = max(80, 150 * (1 + np.log10(max(m, 0.1))))
+            if stellar_type in [2, 3, 4, 5, 6]:
+                s *= 1.5
 
-        s = np.fabs(s)
-        
-        return color,s,description
+        return color, s, description, marker
 
 
     @staticmethod
-    def get_description_for_event_flag(event_flag, SNe_type = None):
+    def get_description_for_event_flag(event_flag, SNe_type=None):
         if event_flag == 0:
-            text = "$\mathrm{Initial\,system}$"
+            text = r"$\mathrm{Initial\,system}$"
         elif event_flag == 1:
-            text = "$\mathrm{Stellar\,type\,change}$"
+            text = r"$\mathrm{Stellar\,type\,change}$"
         elif event_flag == 2:
-            if SNe_type != None:
+            if SNe_type is not None:
                 SNe_type_string = ""
                 if SNe_type == 1:
-                    SNe_type_string = "Type\,Ia"
+                    SNe_type_string = r"Type\,Ia"
                 if SNe_type == 2:
-                    SNe_type_string = "Type\,II"
+                    SNe_type_string = r"Type\,II"
                 if SNe_type == 3:
-                    SNe_type_string = "Electron\,capture"
+                    SNe_type_string = r"Electron\,capture"
                 if SNe_type == 4:
-                    SNe_type_string = "Type\,Ib"
-                text = "$\mathrm{SNe\,start\,(%s)}$"%SNe_type_string
+                    SNe_type_string = r"Type\,Ib"
+                text = r"$\mathrm{SNe\,start\,(%s)}$" % SNe_type_string
             else:
-                text = "$\mathrm{SNe\,start}$"
+                text = r"$\mathrm{SNe\,start}$"
         elif event_flag == 3:
-            text = "$\mathrm{SNe\,end}$"
+            text = r"$\mathrm{SNe\,end}$"
         elif event_flag == 4:
-            text = "$\mathrm{RLOF\,start}$"
+            text = r"$\mathrm{RLOF\,start}$"
         elif event_flag == 5:
-            text = "$\mathrm{RLOF\,end}$"
+            text = r"$\mathrm{RLOF\,end}$"
         elif event_flag == 6:
-            text = "$\mathrm{CE\,start}$"
+            text = r"$\mathrm{CE\,start}$"
         elif event_flag == 7:
-            text = "$\mathrm{CE\,end}$"
+            text = r"$\mathrm{CE\,end}$"
         elif event_flag == 8:
-            text = "$\mathrm{Collision\,start}$"
+            text = r"$\mathrm{Collision\,start}$"
         elif event_flag == 9:
-            text = "$\mathrm{Collision\,end}$"
+            text = r"$\mathrm{Collision\,end}$"
         elif event_flag == 10:
-            text = "$\mathrm{Dyn.\,inst.}$"
+            text = r"$\mathrm{Dyn.\,inst.}$"
         elif event_flag == 11:
-            text = "$\mathrm{Sec.\,break.}$"
+            text = r"$\mathrm{Sec.\,break.}$"
         elif event_flag == 12:
-            text = "$\mathrm{WD\,kick\,start}$"
+            text = r"$\mathrm{WD\,kick\,start}$"
         elif event_flag == 13:
-            text = "$\mathrm{WD\,kick\,end}$"
+            text = r"$\mathrm{WD\,kick\,end}$"
         elif event_flag == 14:
-            text = "$\mathrm{Triple\,CE\,start}$"
+            text = r"$\mathrm{Triple\,CE\,start}$"
         elif event_flag == 15:
-            text = "$\mathrm{Triple\,CE\,end}$"
+            text = r"$\mathrm{Triple\,CE\,end}$"
         elif event_flag == 16:
-            text = "$\mathrm{MSP\,formation}$"
+            text = r"$\mathrm{MSP\,formation}$"
         elif event_flag == 17:
-            text = "$\mathrm{Final\,state}$"
+            text = r"$\mathrm{Final\,state}$"
         elif event_flag == 18:
-            text = "$\mathrm{sdB\,formation}$"
+            text = r"$\mathrm{sdB\,formation}$"
         elif event_flag == 19:
-            text = "$\mathrm{RLOF\,low\,mass\,donor}$"
+            text = r"$\mathrm{RLOF\,low\,mass\,donor}$"
         elif event_flag == 20:
-            text = "$\mathrm{RLOF\,WD\,donor}$"
+            text = r"$\mathrm{RLOF\,WD\,donor}$"
         elif event_flag == 21:
-            text = "$\mathrm{Entering\,LISA\,band}$"
+            text = r"$\mathrm{Entering\,LISA\,band}$"
         elif event_flag == 22:
-            text = "$\mathrm{Start\,N\!-\!body}$"
+            text = r"$\mathrm{Start\,N\!-\!body}$"
         elif event_flag == 23:
-            text = "$\mathrm{End\,N\!-\!body}$"
+            text = r"$\mathrm{End\,N\!-\!body}$"
         else:
             text = ""
         return text

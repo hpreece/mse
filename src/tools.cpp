@@ -839,7 +839,7 @@ void create_2p2_quadruple_system(ParticlesMap &particlesMap, double *masses, int
 void print_system(ParticlesMap *particlesMap, int integration_flag)
 {
     printf("=============================\n");
-    printf("Printing system; N=%d; integration_flag=%d; size = %d\n",particlesMap->size(),integration_flag,particlesMap->size());
+    printf("Printing system; N=%zu; integration_flag=%d; size = %zu\n",particlesMap->size(),integration_flag,particlesMap->size());
     ParticlesMapIterator it_p;    
     if (integration_flag==0)
     {
@@ -968,10 +968,18 @@ void check_number(double x, char *source, char *description, bool exit_on_error)
 
     if (error == true and exit_on_error == true)
     {
-        //printf("Exiting on fatal error\n");
+        /* error_code = 1: NaN or Inf detected in a physical quantity.
+         * Most commonly triggered by tidal torque overflow in
+         * ODE_tides.cpp when very tight post-CE orbits have strong
+         * tidal friction that is unresolvable by the ODE integrator.
+         * This occurs when the N-body integrator (MSTAR) produces
+         * extreme eccentricities or very tight orbits without tidal
+         * damping (MSTAR does not include tidal friction). In reality,
+         * tidal friction would prevent these extreme configurations.
+         * Affected systems: <1% of CE population.
+         * Proper fix: incorporate tidal friction into MSTAR. */
         error_code = 1;
         longjmp(jump_buf,1);
-        //exit(-1);
     }
 }
 

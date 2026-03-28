@@ -48,6 +48,8 @@ extern std::mt19937 random_number_generator; //Standard mersenne_twister_engine 
 #define LOG_ENTER_LISA_BAND         (int)   21
 #define LOG_START_NBODY             (int)   22
 #define LOG_END_NBODY               (int)   23
+#define LOG_QUADRUPLE_CE_START      (int)   24
+#define LOG_QUADRUPLE_CE_END        (int)   25
 #endif
 
 

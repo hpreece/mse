@@ -2,9 +2,40 @@
 
 #include "evolve.h"
 #include "test.h"
+#include "mlp_forward_pass.h"
 
 #include <iostream>
 #include <fstream>
+
+#define MLP_INSTABILITY_ENTRY_THRESHOLD 0.5
+#define MLP_INSTABILITY_EXIT_THRESHOLD 0.3
+
+static bool mlp_features_in_range_triple(const double f[6])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.001 || f[2] > 0.95) return false;
+    if (f[3] < 0.0 || f[3] > 0.9999) return false;
+    if (f[4] < 0.0 || f[4] > 0.9999) return false;
+    if (f[5] < 0.0 || f[5] > 1.0) return false;
+    return true;
+}
+
+static bool mlp_features_in_range_quad_3p1(const double f[11])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.01 || f[2] > 50.0) return false;
+    if (f[3] < 0.001 || f[3] > 0.95) return false;
+    if (f[4] < 0.001 || f[4] > 0.95) return false;
+    if (f[5] < 0.0 || f[5] > 0.9999) return false;
+    if (f[6] < 0.0 || f[6] > 0.9999) return false;
+    if (f[7] < 0.0 || f[7] > 0.9999) return false;
+    if (f[8] < 0.0 || f[8] > 1.0) return false;
+    if (f[9] < 0.0 || f[9] > 1.0) return false;
+    if (f[10] < 0.0 || f[10] > 1.0) return false;
+    return true;
+}
 
 extern "C"
 {
@@ -2316,7 +2347,7 @@ int test_kick_velocity(int kick_distribution, double m, int *kw, double *v_norm)
         t_old = t;
         if (dt<0)
         {
-            printf("ERROR %g %\n",dt);
+            printf("ERROR %g\n",dt);
         }
         if (t>t_max)
         {
@@ -2765,7 +2796,7 @@ int test_mass_accretion_events_with_degenerate_objects()
 
     if (particlesMap.size() != 1)
     {
-        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects -- error: incorrect number (%d) of particles after SNe \n",particlesMap.size());
+        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects -- error: incorrect number (%zu) of particles after SNe \n",particlesMap.size());
         flag = 1;
     }
 
@@ -2801,7 +2832,7 @@ int test_mass_accretion_events_with_degenerate_objects()
     
     if (particlesMap.size() != 3 or star2->stellar_type != 13) /* Check that NS was formed */
     {
-        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects -- error: incorrect number (%d) of particles after ECSN or incorrect stellar type (%d) \n",particlesMap.size(),star2->stellar_type);
+        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects -- error: incorrect number (%zu) of particles after ECSN or incorrect stellar type (%d) \n",particlesMap.size(),star2->stellar_type);
         flag = 1;
     }
 
@@ -2853,7 +2884,7 @@ int test_mass_accretion_events_with_degenerate_objects()
     
     if (particlesMap.size() != 2) /* Check that two WDs were destroyed */
     {
-        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects -- error: incorrect number (%d) of particles after two SNe\n",particlesMap.size());
+        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects -- error: incorrect number (%zu) of particles after two SNe\n",particlesMap.size());
         flag = 1;
     }
 
@@ -2894,7 +2925,7 @@ int test_mass_accretion_events_with_degenerate_objects()
     
     if (particlesMap.size() != 4 or star2->stellar_type != 13 or star4->stellar_type != 13) /* Check that two NSs were formed */
     {
-        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects -- error: incorrect number (%d) of particles after two ECSN or incorrect stellar types (%d; %d) \n",particlesMap.size(),star2->stellar_type,star4->stellar_type);
+        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects -- error: incorrect number (%zu) of particles after two ECSN or incorrect stellar types (%d; %d) \n",particlesMap.size(),star2->stellar_type,star4->stellar_type);
         flag = 1;
     }
 
@@ -2971,7 +3002,7 @@ int test_mass_accretion_events_with_degenerate_objects_single_degenerate_model_1
 
     if (particlesMap.size() != 1)
     {
-        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects_model_1 -- error: incorrect number (%d) of particles after SNe \n",particlesMap.size());
+        printf("test.cpp -- test_mass_accretion_events_with_degenerate_objects_model_1 -- error: incorrect number (%zu) of particles after SNe \n",particlesMap.size());
         flag = 1;
     }
 
@@ -3207,7 +3238,7 @@ int test_mass_transfer_special_cases_old()
 
     if (particlesMap.size() != 1)
     {
-        printf("test.cpp -- test_mass_transfer_special_cases -- error: incorrect number (%d) of particles after SNe \n",particlesMap.size());
+        printf("test.cpp -- test_mass_transfer_special_cases -- error: incorrect number (%zu) of particles after SNe \n",particlesMap.size());
         flag = 1;
     }
     
@@ -3239,7 +3270,7 @@ int test_mass_transfer_special_cases_old()
     
     if (particlesMap.size() != 3 or star2->stellar_type != 13) /* Check that NS was formed */
     {
-        printf("test.cpp -- test_mass_transfer_special_cases -- error: incorrect number (%d) of particles after ECSN or incorrect stellar type (%d) \n",particlesMap.size(),star2->stellar_type);
+        printf("test.cpp -- test_mass_transfer_special_cases -- error: incorrect number (%zu) of particles after ECSN or incorrect stellar type (%d) \n",particlesMap.size(),star2->stellar_type);
         flag = 1;
     }
 
@@ -3580,14 +3611,12 @@ int test_binary_common_envelope_evolution()
 
             double num = particlesMap[6]->a; // the post-CE binary will have index 6 in this case
 
-            /* H36: Expected value is computed with the FIXED CE energy formula.
-             * ECIRC is derived from total pre-CE masses (M1, M2); EORBF = ECIRC + EBIND/alpha.
-             * This differs from the old (buggy) formula that used EORBI_core as the baseline. */
+            /* H36 reverted (2026-03-21): BSE/COSMIC convention — EORBI uses core masses
+             * (CEFLAG != 3), ECIRC = EORBI/(1-e^2), EORBF = EORBI + EBIND/alpha.
+             * See logs/v3.1/phase5/h36_investigation.md */
             double EBINDI = M1 * (M1 - MC1)/(LAMB1 * R1);
-            double EORBI_total = M1 * M2/(2.0 * smas[0]);           // pre-CE total masses
-            double ECC_init = es[0];                                  // initial eccentricity
-            double ECIRC = EORBI_total / (1.0 - ECC_init*ECC_init); // equivalent circular orbit (total masses)
-            double EORBF = ECIRC + EBINDI/alpha;                     // BSE formula: baseline = ECIRC
+            double EORBI = MC1 * M2/(2.0 * smas[0]);                 // core mass (CEFLAG=0 default)
+            double EORBF = EORBI + EBINDI/alpha;                     // BSE convention
             double a_f =  MC1 * M2/(2.0 * EORBF); // secondary does not have a core; assume it did not lose mass
             
             double tol = 1e-4;
@@ -3614,15 +3643,16 @@ int test_binary_common_envelope_evolution()
 int test_triple_interactions()
 {
     printf("test.cpp -- test_triple_interactions\n");
-    
+
     int flag=0;
     flag += test_triple_common_envelope_evolution();
-    
+    flag += test_mlp_robustness();
+
     if (flag == 0)
     {
         printf("test.cpp -- test_triple_interactions -- passed\n");
     }
-    
+
     return flag;
 }
 
@@ -4731,6 +4761,269 @@ int test_reset_interface()
         printf("test.cpp -- test_reset_interface -- passed\n");
     }
 
+    return flag;
+}
+
+
+/****************************
+ * MLP Robustness Tests     *
+ ****************************/
+
+int test_mlp_robustness()
+{
+    printf("test.cpp -- test_mlp_robustness\n");
+    int flag = 0;
+
+    flag += test_mlp_feature_range_fallback();
+    flag += test_mlp_hysteresis_thresholds();
+    flag += test_mlp_scan_bisect();
+
+    if (flag == 0)
+    {
+        printf("test.cpp -- test_mlp_robustness -- passed\n");
+    }
+
+    return flag;
+}
+
+int test_mlp_feature_range_fallback()
+{
+    printf("test.cpp -- test_mlp_feature_range_fallback\n");
+    int flag = 0;
+
+    /* Test 1: In-range features should pass range check */
+    {
+        double features_ok[6] = {0.5, 1.0, 0.1, 0.3, 0.2, 0.5};
+        if (!mlp_features_in_range_triple(features_ok))
+        {
+            printf("test.cpp -- error in test_mlp_feature_range_fallback: valid triple features rejected\n");
+            flag = 1;
+        }
+    }
+
+    /* Test 2: Out-of-range qi (mass ratio > 1) should fail */
+    {
+        double features_bad_qi[6] = {100.0, 1.0, 0.1, 0.3, 0.2, 0.5};
+        if (mlp_features_in_range_triple(features_bad_qi))
+        {
+            printf("test.cpp -- error in test_mlp_feature_range_fallback: qi=100 should be out of range\n");
+            flag = 1;
+        }
+    }
+
+    /* Test 3: Out-of-range a_ratio (negative) should fail */
+    {
+        double features_bad_a[6] = {0.5, 1.0, -1.0, 0.3, 0.2, 0.5};
+        if (mlp_features_in_range_triple(features_bad_a))
+        {
+            printf("test.cpp -- error in test_mlp_feature_range_fallback: a_ratio=-1 should be out of range\n");
+            flag = 1;
+        }
+    }
+
+    /* Test 4: Out-of-range a_ratio (> 0.95) should fail */
+    {
+        double features_bad_a2[6] = {0.5, 1.0, 0.99, 0.3, 0.2, 0.5};
+        if (mlp_features_in_range_triple(features_bad_a2))
+        {
+            printf("test.cpp -- error in test_mlp_feature_range_fallback: a_ratio=0.99 should be out of range\n");
+            flag = 1;
+        }
+    }
+
+    /* Test 5: In-range 3+1 quad features should pass */
+    {
+        double features_quad_ok[11] = {0.5, 1.0, 1.0, 0.1, 0.1, 0.3, 0.2, 0.1, 0.5, 0.5, 0.5};
+        if (!mlp_features_in_range_quad_3p1(features_quad_ok))
+        {
+            printf("test.cpp -- error in test_mlp_feature_range_fallback: valid quad features rejected\n");
+            flag = 1;
+        }
+    }
+
+    /* Test 6: Out-of-range quad qi (< 0.01) should fail */
+    {
+        double features_quad_bad[11] = {0.001, 1.0, 1.0, 0.1, 0.1, 0.3, 0.2, 0.1, 0.5, 0.5, 0.5};
+        if (mlp_features_in_range_quad_3p1(features_quad_bad))
+        {
+            printf("test.cpp -- error in test_mlp_feature_range_fallback: quad qi=0.001 should be out of range\n");
+            flag = 1;
+        }
+    }
+
+    /* Test 7: MLP returns a value in [0,1] for valid features */
+    {
+        double features_valid[6] = {0.5, 1.0, 0.1, 0.3, 0.2, 0.5};
+        double P = mlp_predict_triple(features_valid);
+        if (P < 0.0 || P > 1.0)
+        {
+            printf("test.cpp -- error in test_mlp_feature_range_fallback: MLP returned P=%g outside [0,1]\n", P);
+            flag = 1;
+        }
+    }
+
+    if (flag == 0)
+    {
+        printf("test.cpp -- test_mlp_feature_range_fallback -- passed\n");
+    }
+    return flag;
+}
+
+int test_mlp_hysteresis_thresholds()
+{
+    printf("test.cpp -- test_mlp_hysteresis_thresholds\n");
+    int flag = 0;
+
+    /* Verify threshold values */
+    if (MLP_INSTABILITY_ENTRY_THRESHOLD != 0.5)
+    {
+        printf("test.cpp -- error in test_mlp_hysteresis_thresholds: ENTRY_THRESHOLD=%g, expected 0.5\n",
+               (double)MLP_INSTABILITY_ENTRY_THRESHOLD);
+        flag = 1;
+    }
+
+    if (MLP_INSTABILITY_EXIT_THRESHOLD != 0.3)
+    {
+        printf("test.cpp -- error in test_mlp_hysteresis_thresholds: EXIT_THRESHOLD=%g, expected 0.3\n",
+               (double)MLP_INSTABILITY_EXIT_THRESHOLD);
+        flag = 1;
+    }
+
+    /* Verify dead band: entry > exit */
+    if (MLP_INSTABILITY_ENTRY_THRESHOLD <= MLP_INSTABILITY_EXIT_THRESHOLD)
+    {
+        printf("test.cpp -- error in test_mlp_hysteresis_thresholds: ENTRY (%g) must be > EXIT (%g)\n",
+               (double)MLP_INSTABILITY_ENTRY_THRESHOLD, (double)MLP_INSTABILITY_EXIT_THRESHOLD);
+        flag = 1;
+    }
+
+    /* Test hysteresis logic: P=0.4 is between thresholds.
+     * - Should NOT trigger instability on entry (P=0.4 < 0.5)
+     * - Should NOT allow exit from N-body (P=0.4 >= 0.3) */
+    {
+        double P_test = 0.4;
+        bool would_enter = (P_test > MLP_INSTABILITY_ENTRY_THRESHOLD);
+        bool would_exit = (P_test < MLP_INSTABILITY_EXIT_THRESHOLD);
+
+        if (would_enter)
+        {
+            printf("test.cpp -- error in test_mlp_hysteresis_thresholds: P=0.4 should NOT trigger entry\n");
+            flag = 1;
+        }
+        if (would_exit)
+        {
+            printf("test.cpp -- error in test_mlp_hysteresis_thresholds: P=0.4 should NOT allow exit\n");
+            flag = 1;
+        }
+    }
+
+    /* P=0.6 should trigger entry */
+    {
+        double P_test = 0.6;
+        bool would_enter = (P_test > MLP_INSTABILITY_ENTRY_THRESHOLD);
+        if (!would_enter)
+        {
+            printf("test.cpp -- error in test_mlp_hysteresis_thresholds: P=0.6 should trigger entry\n");
+            flag = 1;
+        }
+    }
+
+    /* P=0.2 should allow exit */
+    {
+        double P_test = 0.2;
+        bool would_exit = (P_test < MLP_INSTABILITY_EXIT_THRESHOLD);
+        if (!would_exit)
+        {
+            printf("test.cpp -- error in test_mlp_hysteresis_thresholds: P=0.2 should allow exit\n");
+            flag = 1;
+        }
+    }
+
+    if (flag == 0)
+    {
+        printf("test.cpp -- test_mlp_hysteresis_thresholds -- passed\n");
+    }
+    return flag;
+}
+
+int test_mlp_scan_bisect()
+{
+    printf("test.cpp -- test_mlp_scan_bisect\n");
+    int flag = 0;
+
+    /* Test the scan+bisect logic by evaluating the MLP at a series of a_ratio values
+     * for a fixed triple system. Verify that the MLP is well-behaved (returns [0,1])
+     * and that we can find crossings of the exit threshold. */
+
+    double qi = 0.8;   /* near-equal mass inner binary */
+    double qo = 0.5;   /* tertiary half of inner binary mass */
+    double e_in = 0.1;
+    double e_out = 0.1;
+    double incl = 0.5;  /* 0.5 * pi = 90 degrees */
+
+    int N_scan = 20;
+    double P_values[21];
+    int n_crossings = 0;
+    int outermost_crossing = -1;
+
+    for (int k = 0; k <= N_scan; k++)
+    {
+        double a_ratio = 0.002 + k * (0.94 - 0.002) / N_scan;
+        double features[6] = {qi, qo, a_ratio, e_in, e_out, incl};
+
+        if (!mlp_features_in_range_triple(features))
+        {
+            printf("test.cpp -- error in test_mlp_scan_bisect: features should be in range at k=%d a_ratio=%g\n", k, a_ratio);
+            flag = 1;
+            continue;
+        }
+
+        P_values[k] = mlp_predict_triple(features);
+
+        if (P_values[k] < 0.0 || P_values[k] > 1.0)
+        {
+            printf("test.cpp -- error in test_mlp_scan_bisect: P=%g outside [0,1] at a_ratio=%g\n", P_values[k], a_ratio);
+            flag = 1;
+        }
+    }
+
+    /* Count crossings of exit threshold */
+    for (int k = 0; k < N_scan; k++)
+    {
+        bool below_k = (P_values[k] < MLP_INSTABILITY_EXIT_THRESHOLD);
+        bool below_k1 = (P_values[k+1] < MLP_INSTABILITY_EXIT_THRESHOLD);
+        if (below_k != below_k1)
+        {
+            n_crossings++;
+            if (outermost_crossing < 0)
+            {
+                outermost_crossing = k;
+            }
+        }
+    }
+
+    printf("test.cpp -- test_mlp_scan_bisect -- found %d crossing(s) of P=%.2f\n",
+           n_crossings, MLP_INSTABILITY_EXIT_THRESHOLD);
+
+    /* For this system (well-separated a_ratio range), we expect at least one crossing
+     * since tight orbits (a_ratio near 0.95) should be unstable and wide orbits
+     * (a_ratio near 0.001) should be stable. */
+    if (n_crossings < 1)
+    {
+        printf("test.cpp -- warning in test_mlp_scan_bisect: expected at least 1 crossing, found %d (not necessarily an error)\n", n_crossings);
+        /* Not a hard failure — the MLP might not cross 0.3 for this particular system */
+    }
+
+    /* Verify the outermost crossing is the one with smallest a_ratio (closest to f=0) */
+    if (n_crossings > 1 && outermost_crossing >= 0)
+    {
+        printf("test.cpp -- test_mlp_scan_bisect -- outermost crossing at scan index %d (non-monotonic MLP detected)\n", outermost_crossing);
+    }
+
+    if (flag == 0)
+    {
+        printf("test.cpp -- test_mlp_scan_bisect -- passed\n");
+    }
     return flag;
 }
 

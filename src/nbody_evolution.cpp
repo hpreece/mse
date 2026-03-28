@@ -2,7 +2,38 @@
 
 #include "nbody_evolution.h"
 #include "evolve.h"
+#include "mlp_forward_pass.h"
 //#include "mstar/regularization.h"
+
+#define MLP_INSTABILITY_ENTRY_THRESHOLD 0.5
+#define MLP_INSTABILITY_EXIT_THRESHOLD 0.3
+
+static bool mlp_features_in_range_triple(const double f[6])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.001 || f[2] > 0.95) return false;
+    if (f[3] < 0.0 || f[3] > 0.9999) return false;
+    if (f[4] < 0.0 || f[4] > 0.9999) return false;
+    if (f[5] < 0.0 || f[5] > 1.0) return false;
+    return true;
+}
+
+static bool mlp_features_in_range_quad_3p1(const double f[11])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.01 || f[2] > 50.0) return false;
+    if (f[3] < 0.001 || f[3] > 0.95) return false;
+    if (f[4] < 0.001 || f[4] > 0.95) return false;
+    if (f[5] < 0.0 || f[5] > 0.9999) return false;
+    if (f[6] < 0.0 || f[6] > 0.9999) return false;
+    if (f[7] < 0.0 || f[7] > 0.9999) return false;
+    if (f[8] < 0.0 || f[8] > 1.0) return false;
+    if (f[9] < 0.0 || f[9] > 1.0) return false;
+    if (f[10] < 0.0 || f[10] > 1.0) return false;
+    return true;
+}
 
 extern "C"
 {
@@ -152,15 +183,44 @@ int determine_orbits_in_system_using_nbody(ParticlesMap *particlesMap)
 
 int determine_new_integration_flag_using_nbody(struct RegularizedRegion *R, ParticlesMap *particlesMap, double *P_orb_min, double *P_orb_max)
 {
-    
+
+    /* Capture dynamical_instability_criterion from old binaries before reconstruction.
+     * New binary particles created by find_binaries_in_system() get the default (0),
+     * so we must propagate the criterion to preserve MLP (criterion=4) through N-body transitions. */
+    int old_dynamical_instability_criterion = 0;
+    ParticlesMapIterator it_old;
+    for (it_old = particlesMap->begin(); it_old != particlesMap->end(); it_old++)
+    {
+        Particle *p_old = (*it_old).second;
+        if (p_old->is_binary == true && p_old->dynamical_instability_criterion != 0)
+        {
+            old_dynamical_instability_criterion = p_old->dynamical_instability_criterion;
+            break;
+        }
+    }
+
     bool stable_system;
     ParticlesMap new_particlesMap;
 
-    analyze_mstar_system(R,&stable_system,&new_particlesMap,P_orb_min,P_orb_max,nbody_analysis_minimum_integration_time); // Will create new particlesMap with new orbits 
+    analyze_mstar_system(R,&stable_system,&new_particlesMap,P_orb_min,P_orb_max,nbody_analysis_minimum_integration_time); // Will create new particlesMap with new orbits
 
     copy_bodies_from_old_to_new_particlesMap(particlesMap,&new_particlesMap); // Copy properties of all bodies from old to new particlesMap
 
     copy_particlesMap(&new_particlesMap,particlesMap); /* overwrite everything in the particlesMap that was passed onto integrate_nbody_system so the system is updated */
+
+    /* Propagate dynamical_instability_criterion to newly created binary particles */
+    if (old_dynamical_instability_criterion != 0)
+    {
+        ParticlesMapIterator it_new;
+        for (it_new = particlesMap->begin(); it_new != particlesMap->end(); it_new++)
+        {
+            Particle *p_new = (*it_new).second;
+            if (p_new->is_binary == true)
+            {
+                p_new->dynamical_instability_criterion = old_dynamical_instability_criterion;
+            }
+        }
+    }
 
     int integration_flag;
     int dummy = 0;
@@ -168,13 +228,192 @@ int determine_new_integration_flag_using_nbody(struct RegularizedRegion *R, Part
 
     if (stable_system == true and stable_MA01 == true)
     {
-        integration_flag = 0; // Switch back to secular
+        /* For MLP criterion (4), apply hysteresis: require P < EXIT_THRESHOLD
+         * before returning to secular. This prevents boundary cycling. */
+        bool mlp_exit_blocked = false;
+        if (old_dynamical_instability_criterion == 4)
+        {
+            ParticlesMapIterator it_mlp;
+            for (it_mlp = particlesMap->begin(); it_mlp != particlesMap->end(); it_mlp++)
+            {
+                Particle *p_mlp = (*it_mlp).second;
+                if (p_mlp->is_binary == true && p_mlp->parent != -1)
+                {
+                    Particle *parent_mlp = (*particlesMap)[p_mlp->parent];
+                    Particle *sibling_mlp = (*particlesMap)[p_mlp->sibling];
+
+                    double a_in_mlp = p_mlp->a;
+                    double e_in_mlp = p_mlp->e;
+                    double a_out_mlp = parent_mlp->a;
+                    double e_out_mlp = parent_mlp->e;
+
+                    /* Guard: if orbital elements are invalid after N-body reconstruction,
+                     * stay in N-body rather than risk NaN in secular integration. */
+                    if (a_in_mlp <= 0.0 || a_out_mlp <= 0.0 || isnan(a_in_mlp) || isnan(a_out_mlp) ||
+                        e_in_mlp < 0.0 || e_in_mlp >= 1.0 || e_out_mlp < 0.0 || e_out_mlp >= 1.0)
+                    {
+                        mlp_exit_blocked = true;
+                        #ifdef VERBOSE
+                        if (verbose_flag > 0)
+                        {
+                            printf("nbody_evolution.cpp -- MLP hysteresis: invalid orbital elements (a_in %g a_out %g e_in %g e_out %g), staying in N-body\n", a_in_mlp, a_out_mlp, e_in_mlp, e_out_mlp);
+                        }
+                        #endif
+                        break;
+                    }
+
+                    if (sibling_mlp->is_binary == false)
+                    {
+                        Particle *c1_mlp = (*particlesMap)[p_mlp->child1];
+                        Particle *c2_mlp = (*particlesMap)[p_mlp->child2];
+
+                        if (!c1_mlp->is_binary && !c2_mlp->is_binary)
+                        {
+                            /* Triple */
+                            double m1_mlp = c1_mlp->mass;
+                            double m2_mlp = c2_mlp->mass;
+                            if (m1_mlp > 0.0 && m2_mlp > 0.0 && p_mlp->mass > 0.0 && a_out_mlp > 0.0)
+                            {
+                                double qi = (m1_mlp < m2_mlp) ? m1_mlp/m2_mlp : m2_mlp/m1_mlp;
+                                double qo = sibling_mlp->mass / p_mlp->mass;
+                                double a_ratio = a_in_mlp / a_out_mlp;
+                                double rel_INCL_mlp = 0.0;
+                                get_inclination_relative_to_parent(particlesMap, p_mlp->index, &rel_INCL_mlp);
+
+                                double features[6] = {qi, qo, a_ratio, e_in_mlp, e_out_mlp, rel_INCL_mlp / M_PI};
+                                if (mlp_features_in_range_triple(features))
+                                {
+                                    double P_exit = mlp_predict_triple(features);
+                                    if (P_exit >= MLP_INSTABILITY_EXIT_THRESHOLD)
+                                    {
+                                        mlp_exit_blocked = true;
+                                        #ifdef VERBOSE
+                                        if (verbose_flag > 0)
+                                        {
+                                            printf("nbody_evolution.cpp -- MLP hysteresis: P_exit=%g >= %g, staying in N-body\n", P_exit, MLP_INSTABILITY_EXIT_THRESHOLD);
+                                        }
+                                        #endif
+                                    }
+                                }
+                                else
+                                {
+                                    /* MLP features out of range: fall back to MA01 for hysteresis.
+                                     * If MA01 says unstable, stay in N-body. */
+                                    double rp_out_hysteresis = a_out_mlp * (1.0 - e_out_mlp);
+                                    double rp_crit_hysteresis = compute_rp_out_crit_MA01(a_in_mlp, qo, e_out_mlp, rel_INCL_mlp);
+                                    if (rp_out_hysteresis < rp_crit_hysteresis)
+                                    {
+                                        mlp_exit_blocked = true;
+                                        #ifdef VERBOSE
+                                        if (verbose_flag > 0)
+                                        {
+                                            printf("nbody_evolution.cpp -- MLP hysteresis: features out of range, MA01 fallback says unstable (rp %g < rp_crit %g), staying in N-body\n", rp_out_hysteresis, rp_crit_hysteresis);
+                                        }
+                                        #endif
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                /* Mass guards failed: cannot evaluate stability, stay in N-body */
+                                mlp_exit_blocked = true;
+                            }
+                        }
+                        else
+                        {
+                            /* 3+1 quad */
+                            Particle *P_inner_mlp = c1_mlp->is_binary ? c1_mlp : c2_mlp;
+                            Particle *P_mid_body_mlp = c1_mlp->is_binary ? c2_mlp : c1_mlp;
+                            Particle *P_ic1 = (*particlesMap)[P_inner_mlp->child1];
+                            Particle *P_ic2 = (*particlesMap)[P_inner_mlp->child2];
+
+                            double mi1 = P_ic1->mass;
+                            double mi2 = P_ic2->mass;
+                            if (mi1 > 0.0 && mi2 > 0.0 && P_inner_mlp->mass > 0.0 && p_mlp->mass > 0.0 &&
+                                P_inner_mlp->a > 0.0 && a_in_mlp > 0.0 && a_out_mlp > 0.0)
+                            {
+                                double qi = (mi1 < mi2) ? mi1/mi2 : mi2/mi1;
+                                double qm = P_mid_body_mlp->mass / P_inner_mlp->mass;
+                                double qo = sibling_mlp->mass / p_mlp->mass;
+                                double alim = P_inner_mlp->a / a_in_mlp;
+                                double almo = a_in_mlp / a_out_mlp;
+
+                                double h_inner_norm = norm3(P_inner_mlp->h_vec);
+                                double h_mid_norm = norm3(p_mlp->h_vec);
+                                double h_out_norm = norm3(parent_mlp->h_vec);
+
+                                double cos_iim = (h_inner_norm > 0.0 && h_mid_norm > 0.0) ?
+                                    dot3(P_inner_mlp->h_vec, p_mlp->h_vec) / (h_inner_norm * h_mid_norm) : 1.0;
+                                double cos_iio = (h_inner_norm > 0.0 && h_out_norm > 0.0) ?
+                                    dot3(P_inner_mlp->h_vec, parent_mlp->h_vec) / (h_inner_norm * h_out_norm) : 1.0;
+                                double cos_imo = (h_mid_norm > 0.0 && h_out_norm > 0.0) ?
+                                    dot3(p_mlp->h_vec, parent_mlp->h_vec) / (h_mid_norm * h_out_norm) : 1.0;
+
+                                if (cos_iim < -1.0) cos_iim = -1.0; if (cos_iim > 1.0) cos_iim = 1.0;
+                                if (cos_iio < -1.0) cos_iio = -1.0; if (cos_iio > 1.0) cos_iio = 1.0;
+                                if (cos_imo < -1.0) cos_imo = -1.0; if (cos_imo > 1.0) cos_imo = 1.0;
+
+                                double features[11] = {qi, qm, qo, alim, almo, P_inner_mlp->e, e_in_mlp, e_out_mlp,
+                                                       acos(cos_iim) / M_PI, acos(cos_iio) / M_PI, acos(cos_imo) / M_PI};
+                                if (mlp_features_in_range_quad_3p1(features))
+                                {
+                                    double P_exit = mlp_predict_quad_3p1(features);
+                                    if (P_exit >= MLP_INSTABILITY_EXIT_THRESHOLD)
+                                    {
+                                        mlp_exit_blocked = true;
+                                        #ifdef VERBOSE
+                                        if (verbose_flag > 0)
+                                        {
+                                            printf("nbody_evolution.cpp -- MLP hysteresis (3+1): P_exit=%g >= %g, staying in N-body\n", P_exit, MLP_INSTABILITY_EXIT_THRESHOLD);
+                                        }
+                                        #endif
+                                    }
+                                }
+                                else
+                                {
+                                    /* MLP 3+1 features out of range: fall back to MA01 for hysteresis */
+                                    double rp_out_hysteresis = a_out_mlp * (1.0 - e_out_mlp);
+                                    double qo_ma01 = sibling_mlp->mass / p_mlp->mass;
+                                    double rel_INCL_hysteresis = 0.0;
+                                    get_inclination_relative_to_parent(particlesMap, p_mlp->index, &rel_INCL_hysteresis);
+                                    double rp_crit_hysteresis = compute_rp_out_crit_MA01(a_in_mlp, qo_ma01, e_out_mlp, rel_INCL_hysteresis);
+                                    if (rp_out_hysteresis < rp_crit_hysteresis)
+                                    {
+                                        mlp_exit_blocked = true;
+                                        #ifdef VERBOSE
+                                        if (verbose_flag > 0)
+                                        {
+                                            printf("nbody_evolution.cpp -- MLP hysteresis (3+1): features out of range, MA01 fallback says unstable, staying in N-body\n");
+                                        }
+                                        #endif
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                /* Mass guards failed: cannot evaluate stability, stay in N-body */
+                                mlp_exit_blocked = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (mlp_exit_blocked)
+        {
+            integration_flag = 1; // Stay in N-body due to MLP hysteresis
+        }
+        else
+        {
+            integration_flag = 0; // Switch back to secular
+        }
     }
     else
     {
         integration_flag = 1; // Continue running direct N-body in "default" mode
     }
-    
+
     return integration_flag;
     
 }

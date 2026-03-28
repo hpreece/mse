@@ -832,7 +832,7 @@ double compute_EOM_equilibrium_tide(ParticlesMap *particlesMap, int binary_index
     #ifdef VERBOSE
     if (verbose_flag > 1)
     {
-        printf("ODE_tides.cpp -- compute_EOM_equilibrium_tide (Eggleton & Kisseleva 1998) -- t_f_inv V %g W %g X %g Y %g Z %g\n",t_f_inv,V,W,X,Y,Z);
+        printf("ODE_tides.cpp -- compute_EOM_equilibrium_tide (Eggleton & Kisseleva 1998) -- t_f_inv %g V %g W %g X %g Y %g Z %g\n",t_f_inv,V,W,X,Y,Z);
     }
     #endif
 

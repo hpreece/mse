@@ -3,7 +3,54 @@
 #include "types.h"
 #include "evolve.h"
 #include "ODE_root_finding.h"
+#include "mlp_forward_pass.h"
 #include <stdio.h>
+
+#define MLP_INSTABILITY_ENTRY_THRESHOLD 0.5
+#define MLP_INSTABILITY_EXIT_THRESHOLD 0.3
+
+static bool mlp_features_in_range_triple(const double f[6])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.001 || f[2] > 0.95) return false;
+    if (f[3] < 0.0 || f[3] > 0.9999) return false;
+    if (f[4] < 0.0 || f[4] > 0.9999) return false;
+    if (f[5] < 0.0 || f[5] > 1.0) return false;
+    return true;
+}
+
+static bool mlp_features_in_range_quad_3p1(const double f[11])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.01 || f[2] > 50.0) return false;
+    if (f[3] < 0.001 || f[3] > 0.95) return false;
+    if (f[4] < 0.001 || f[4] > 0.95) return false;
+    if (f[5] < 0.0 || f[5] > 0.9999) return false;
+    if (f[6] < 0.0 || f[6] > 0.9999) return false;
+    if (f[7] < 0.0 || f[7] > 0.9999) return false;
+    if (f[8] < 0.0 || f[8] > 1.0) return false;
+    if (f[9] < 0.0 || f[9] > 1.0) return false;
+    if (f[10] < 0.0 || f[10] > 1.0) return false;
+    return true;
+}
+
+static bool mlp_features_in_range_quad_2p2(const double f[11])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;   /* qi1 */
+    if (f[1] < 0.01 || f[1] > 1.0) return false;   /* qi2 */
+    if (f[2] < 0.01 || f[2] > 1.0) return false;   /* qo  */
+    if (f[3] < 0.001 || f[3] > 0.95) return false;  /* ali1o */
+    if (f[4] < 0.001 || f[4] > 0.95) return false;  /* ali2o */
+    if (f[5] < 0.0 || f[5] > 0.9999) return false;
+    if (f[6] < 0.0 || f[6] > 0.9999) return false;
+    if (f[7] < 0.0 || f[7] > 0.9999) return false;
+    if (f[8] < 0.0 || f[8] > 1.0) return false;
+    if (f[9] < 0.0 || f[9] > 1.0) return false;
+    if (f[10] < 0.0 || f[10] > 1.0) return false;
+    return true;
+}
 
 extern "C"
 {
@@ -109,7 +156,7 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                     #endif
 
                     Particle *P_sibling = (*particlesMap)[P_p->sibling];
-        
+
                     if (P_p->dynamical_instability_criterion == 0) /* for mass ratios on the order of unity */
                     {
                         /* Mardling & Aarseth 2001 */
@@ -130,7 +177,7 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                         double e = e_out;
                         f_root = (0.464 - 0.38*mu - 0.631*e + 0.586*mu*e + 0.15*e*e - 0.198*mu*e*e) - a_in/a_out;
                     }
-                    else if (P_p->dynamical_instability_criterion > 1)
+                    else if (P_p->dynamical_instability_criterion == 2 || P_p->dynamical_instability_criterion == 3)
                     /* in case of a central dominant particle
                      * m1 is the `inner' mass; m2 is the `outer' mass */
                     {
@@ -147,7 +194,7 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                         {
                             m1 = P_child1->mass;
                         }
-                        
+
                         int central_particle_parent;
                         std::vector<int>::iterator it_C_parent;
                         for (it_C_parent = P_central_particle->parents.begin(); it_C_parent != P_central_particle->parents.end(); it_C_parent++)
@@ -162,7 +209,7 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                                 m1 = P_child1->mass;
                             }
                         }
-                            
+
                         if (P_p->dynamical_instability_criterion == 2)
                         {
                             double mu1 = m1/central_particle_mass;
@@ -182,7 +229,185 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
 
                             f_root = rp_out/ra_in - ( 2.4*pow( CV_max(mu1,mu2), c_1div3)*sqrt(a_out/a_in) + 1.15 );
                         }
-                        
+
+                    }
+                    else if (P_p->dynamical_instability_criterion == 4)
+                    /* Vynatheya MLP stability classifier */
+                    {
+                        double P_unstable = 1.0; /* safe fallback: assume unstable */
+                        bool mlp_out_of_range = false;
+
+                        if (P_sibling->is_binary == false)
+                        {
+                            /* Triple or 3+1 quad (middle level) */
+                            bool child1_is_binary = P_child1->is_binary;
+                            bool child2_is_binary = P_child2->is_binary;
+
+                            if (!child1_is_binary && !child2_is_binary)
+                            {
+                                /* Triple: P_p is inner binary with two body children, sibling is a body */
+                                double m1 = P_child1->mass;
+                                double m2 = P_child2->mass;
+                                double m_comp = P_sibling->mass;
+
+                                if (m1 > 0.0 && m2 > 0.0 && M_p > 0.0 && a_out > 0.0)
+                                {
+                                    double qi = (m1 < m2) ? m1/m2 : m2/m1;
+                                    double qo = m_comp / M_p;
+                                    double a_ratio = a_in / a_out;
+                                    double rel_INCL = 0.0;
+                                    get_inclination_relative_to_parent(particlesMap, P_p->index, &rel_INCL);
+
+                                    double features[6] = {qi, qo, a_ratio, e_in, e_out, rel_INCL / M_PI};
+                                    if (mlp_features_in_range_triple(features))
+                                    {
+                                        P_unstable = mlp_predict_triple(features);
+                                    }
+                                    else
+                                    {
+                                        mlp_out_of_range = true;
+                                        #ifdef VERBOSE
+                                        if (verbose_flag > 0)
+                                        {
+                                            printf("ODE_root_finding.cpp -- MLP triple features out of range, using MA01 fallback\n");
+                                        }
+                                        #endif
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                /* 3+1 quad: P_p is the middle binary, one child is an inner binary */
+                                Particle *P_inner = child1_is_binary ? P_child1 : P_child2;
+                                Particle *P_mid_body = child1_is_binary ? P_child2 : P_child1;
+
+                                Particle *P_inner_c1 = (*particlesMap)[P_inner->child1];
+                                Particle *P_inner_c2 = (*particlesMap)[P_inner->child2];
+
+                                double mi1 = P_inner_c1->mass;
+                                double mi2 = P_inner_c2->mass;
+                                double m_mid_comp = P_mid_body->mass;
+                                double m_out_comp = P_sibling->mass;
+                                double a_inner = P_inner->a;
+                                double e_inner = P_inner->e;
+                                double a_mid = a_in; /* P_p->a */
+                                double e_mid = e_in; /* P_p->e */
+
+                                if (mi1 > 0.0 && mi2 > 0.0 && P_inner->mass > 0.0 && M_p > 0.0 && a_inner > 0.0 && a_mid > 0.0 && a_out > 0.0)
+                                {
+                                    double qi = (mi1 < mi2) ? mi1/mi2 : mi2/mi1;
+                                    double qm = m_mid_comp / P_inner->mass;
+                                    double qo = m_out_comp / M_p;
+                                    double alim = a_inner / a_mid;
+                                    double almo = a_mid / a_out;
+
+                                    /* Mutual inclinations from h_vec dot products */
+                                    double h_inner_norm = norm3(P_inner->h_vec);
+                                    double h_mid_norm = norm3(P_p->h_vec);
+                                    double h_out_norm = norm3(P_parent->h_vec);
+
+                                    double cos_iim = (h_inner_norm > 0.0 && h_mid_norm > 0.0) ?
+                                        dot3(P_inner->h_vec, P_p->h_vec) / (h_inner_norm * h_mid_norm) : 1.0;
+                                    double cos_iio = (h_inner_norm > 0.0 && h_out_norm > 0.0) ?
+                                        dot3(P_inner->h_vec, P_parent->h_vec) / (h_inner_norm * h_out_norm) : 1.0;
+                                    double cos_imo = (h_mid_norm > 0.0 && h_out_norm > 0.0) ?
+                                        dot3(P_p->h_vec, P_parent->h_vec) / (h_mid_norm * h_out_norm) : 1.0;
+
+                                    /* Clamp to [-1, 1] */
+                                    if (cos_iim < -1.0) cos_iim = -1.0; if (cos_iim > 1.0) cos_iim = 1.0;
+                                    if (cos_iio < -1.0) cos_iio = -1.0; if (cos_iio > 1.0) cos_iio = 1.0;
+                                    if (cos_imo < -1.0) cos_imo = -1.0; if (cos_imo > 1.0) cos_imo = 1.0;
+
+                                    double features[11] = {qi, qm, qo, alim, almo, e_inner, e_mid, e_out,
+                                                           acos(cos_iim) / M_PI, acos(cos_iio) / M_PI, acos(cos_imo) / M_PI};
+                                    if (mlp_features_in_range_quad_3p1(features))
+                                    {
+                                        P_unstable = mlp_predict_quad_3p1(features);
+                                    }
+                                    else
+                                    {
+                                        mlp_out_of_range = true;
+                                        #ifdef VERBOSE
+                                        if (verbose_flag > 0)
+                                        {
+                                            printf("ODE_root_finding.cpp -- MLP 3+1 quad features out of range, using MA01 fallback\n");
+                                        }
+                                        #endif
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            /* 2+2 quad: both P_p and P_sibling are inner binaries under P_parent */
+                            Particle *P_sib_c1 = (*particlesMap)[P_sibling->child1];
+                            Particle *P_sib_c2 = (*particlesMap)[P_sibling->child2];
+
+                            double mi1_1 = P_child1->mass;
+                            double mi1_2 = P_child2->mass;
+                            double mi2_1 = P_sib_c1->mass;
+                            double mi2_2 = P_sib_c2->mass;
+                            double a_sib = P_sibling->a;
+                            double e_sib = P_sibling->e;
+
+                            if (mi1_1 > 0.0 && mi1_2 > 0.0 && mi2_1 > 0.0 && mi2_2 > 0.0 && M_p > 0.0 && P_sibling->mass > 0.0 && a_in > 0.0 && a_sib > 0.0 && a_out > 0.0)
+                            {
+                                double qi1 = (mi1_1 < mi1_2) ? mi1_1/mi1_2 : mi1_2/mi1_1;
+                                double qi2 = (mi2_1 < mi2_2) ? mi2_1/mi2_2 : mi2_2/mi2_1;
+                                double qo = (M_p < P_sibling->mass) ? M_p/P_sibling->mass : P_sibling->mass/M_p;
+                                double ali1o = a_in / a_out;
+                                double ali2o = a_sib / a_out;
+
+                                /* Mutual inclinations from h_vec dot products */
+                                double h1_norm = norm3(P_p->h_vec);
+                                double h2_norm = norm3(P_sibling->h_vec);
+                                double ho_norm = norm3(P_parent->h_vec);
+
+                                double cos_i12 = (h1_norm > 0.0 && h2_norm > 0.0) ?
+                                    dot3(P_p->h_vec, P_sibling->h_vec) / (h1_norm * h2_norm) : 1.0;
+                                double cos_i1o = (h1_norm > 0.0 && ho_norm > 0.0) ?
+                                    dot3(P_p->h_vec, P_parent->h_vec) / (h1_norm * ho_norm) : 1.0;
+                                double cos_i2o = (h2_norm > 0.0 && ho_norm > 0.0) ?
+                                    dot3(P_sibling->h_vec, P_parent->h_vec) / (h2_norm * ho_norm) : 1.0;
+
+                                /* Clamp to [-1, 1] */
+                                if (cos_i12 < -1.0) cos_i12 = -1.0; if (cos_i12 > 1.0) cos_i12 = 1.0;
+                                if (cos_i1o < -1.0) cos_i1o = -1.0; if (cos_i1o > 1.0) cos_i1o = 1.0;
+                                if (cos_i2o < -1.0) cos_i2o = -1.0; if (cos_i2o > 1.0) cos_i2o = 1.0;
+
+                                double features[11] = {qi1, qi2, qo, ali1o, ali2o, e_in, e_sib, e_out,
+                                                       acos(cos_i12) / M_PI, acos(cos_i1o) / M_PI, acos(cos_i2o) / M_PI};
+                                if (mlp_features_in_range_quad_2p2(features))
+                                {
+                                    P_unstable = mlp_predict_quad_2p2(features);
+                                }
+                                else
+                                {
+                                    mlp_out_of_range = true;
+                                    #ifdef VERBOSE
+                                    if (verbose_flag > 0)
+                                    {
+                                        printf("ODE_root_finding.cpp -- MLP 2+2 quad features out of range, using MA01 fallback\n");
+                                    }
+                                    #endif
+                                }
+                            }
+                        }
+
+                        if (mlp_out_of_range)
+                        {
+                            /* Fall back to MA01 criterion */
+                            double q_out_ma01 = P_sibling->mass / M_p;
+                            double rel_INCL_ma01 = 0.0;
+                            get_inclination_relative_to_parent(particlesMap, P_p->index, &rel_INCL_ma01);
+                            double rp_out_crit_ma01 = compute_rp_out_crit_MA01(a_in, q_out_ma01, e_out, rel_INCL_ma01);
+                            f_root = rp_out - rp_out_crit_ma01;
+                        }
+                        else
+                        {
+                            /* f_root = 0.5 - P_unstable: positive when stable, negative when unstable */
+                            f_root = MLP_INSTABILITY_ENTRY_THRESHOLD - P_unstable;
+                        }
                     }
                     
                     #ifdef VERBOSE
@@ -251,7 +476,7 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                         #ifdef VERBOSE
                         if (verbose_flag > 0)
                         {
-                            printf("root_finding.cpp -- check_for_roots -- check_for_physical_collision_or_orbit_crossing index %d a %g cross-section %g root function %g\n",P_p->index,P_p->a,cross_section, root_functions[i_root]);
+                            printf("root_finding.cpp -- check_for_roots -- check_for_physical_collision_or_orbit_crossing index %d a %g cross-section %g root function %Lg\n",P_p->index,P_p->a,cross_section, root_functions[i_root]);
                         }
                         #endif
 
@@ -293,7 +518,7 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                         #ifdef VERBOSE
                         if (verbose_flag > 0)
                         {
-                            printf("root_finding.cpp -- check_for_roots -- check_for_physical_collision_or_orbit_crossing root finding check_for_minimum_periapse_distance index %d a %g cross-section %g root function%g\n",P_p->index,P_p->a,cross_section, root_functions[i_root]);
+                            printf("root_finding.cpp -- check_for_roots -- check_for_physical_collision_or_orbit_crossing root finding check_for_minimum_periapse_distance index %d a %g cross-section %g root function %Lg\n",P_p->index,P_p->a,cross_section, root_functions[i_root]);
                         }
                         #endif
                     }                
@@ -739,7 +964,7 @@ double roche_radius_pericenter_sepinsky(double rp, double q, double e, double f)
                 printf("1 %g %g %g \n",num_0,den_0,j_0);
                 printf("2 %g %g %g \n",num_1,den_1,j_1);            
                 printf("2 %g %g %g \n",den_2,j_2,j_3);            
-                printf("ratio %g %g %g \n",ratio);            
+                printf("ratio %g\n",ratio);            
             }
             #endif
         }

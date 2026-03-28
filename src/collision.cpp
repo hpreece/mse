@@ -893,7 +893,7 @@ void collision_product_star_planet(ParticlesMap *particlesMap, int binary_index,
     #ifdef VERBOSE
     if (verbose_flag > 0)
     {
-        printf("collision.cpp -- collision_product_star_planet  binary_index %d  star_index %d  planet_index %d  t %g integration_flag %d\n",binary_index, star_index, planet_index,t,&integration_flag);
+        printf("collision.cpp -- collision_product_star_planet  binary_index %d  star_index %d  planet_index %d  t %g integration_flag %d\n",binary_index, star_index, planet_index,t,*integration_flag);
         print_system(particlesMap,*integration_flag);
     }
     #endif
@@ -1007,7 +1007,7 @@ void collision_product_star_planet(ParticlesMap *particlesMap, int binary_index,
     #ifdef VERBOSE
     if (verbose_flag > 0)
     {
-        printf("collision.cpp -- collision_product_star_planet post  binary_index %d  star_index %d  planet_index %d  t %g integration_flag %d\n",binary_index, star_index, planet_index,t,&integration_flag);
+        printf("collision.cpp -- collision_product_star_planet post  binary_index %d  star_index %d  planet_index %d  t %g integration_flag %d\n",binary_index, star_index, planet_index,t,*integration_flag);
         print_system(particlesMap,*integration_flag);
     }
     #endif
@@ -1020,7 +1020,7 @@ void collision_product_planet_planet(ParticlesMap *particlesMap, int binary_inde
     #ifdef VERBOSE
     if (verbose_flag > 0)
     {
-        printf("collision.cpp -- collision_product_planet_planet  binary_index %d  planet1_index %d  planet2_index %d  t %g integration_flag %d\n",binary_index, planet1_index, planet2_index,t,&integration_flag);
+        printf("collision.cpp -- collision_product_planet_planet  binary_index %d  planet1_index %d  planet2_index %d  t %g integration_flag %d\n",binary_index, planet1_index, planet2_index,t,*integration_flag);
         print_system(particlesMap,*integration_flag);
     }
     #endif
@@ -1106,7 +1106,7 @@ void collision_product_planet_planet(ParticlesMap *particlesMap, int binary_inde
     #ifdef VERBOSE
     if (verbose_flag > 0)
     {
-        printf("collision.cpp -- collision_product_planet_planet post  binary_index %d  planet1_index %d  planet2_index %d  t %g integration_flag %d\n",binary_index, planet1_index, planet2_index,t,&integration_flag);
+        printf("collision.cpp -- collision_product_planet_planet post  binary_index %d  planet1_index %d  planet2_index %d  t %g integration_flag %d\n",binary_index, planet1_index, planet2_index,t,*integration_flag);
         print_system(particlesMap,*integration_flag);
     }
     #endif

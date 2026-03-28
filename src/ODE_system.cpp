@@ -90,7 +90,7 @@ int integrate_ODE_system(ParticlesMap *particlesMap, double start_time, double e
     {
         for (int i=1; i<=N_ODE_equations; i++)
         {
-            printf("ODE_evolve.cpp -- evolve -- i %d Ith(y,i) %g Ith(y_abs,i) %g\n",i,Ith(y,i),Ith(y_abs_tol,i));
+            printf("ODE_evolve.cpp -- evolve -- i %d Ith(y,i) %Lg Ith(y_abs,i) %Lg\n",i,Ith(y,i),Ith(y_abs_tol,i));
         }
     }
     #endif
@@ -257,7 +257,7 @@ int compute_y_dot(realtype t, N_Vector y, N_Vector y_dot, void *data_)
     #ifdef VERBOSE
     if (verbose_flag > 2)
     {
-        printf("ODE_system.cpp -- compute_y_dot1 t=%g start_time=%g delta_time = %g\n",t,start_time,delta_time);
+        printf("ODE_system.cpp -- compute_y_dot1 t=%Lg start_time=%g delta_time = %g\n",t,start_time,delta_time);
         print_system(particlesMap,0);
 
     }

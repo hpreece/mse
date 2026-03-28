@@ -72,4 +72,9 @@ int test_logdata_empty_guard();
 int test_find_binaries_no_end_deref();
 int test_reset_interface();
 
+int test_mlp_robustness();
+int test_mlp_feature_range_fallback();
+int test_mlp_hysteresis_thresholds();
+int test_mlp_scan_bisect();
+
 }

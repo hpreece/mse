@@ -2,7 +2,54 @@
 
 #include "structure.h"
 #include "evolve.h"
+#include "mlp_forward_pass.h"
 #include <stdio.h>
+
+#define MLP_INSTABILITY_ENTRY_THRESHOLD 0.5
+#define MLP_INSTABILITY_EXIT_THRESHOLD 0.3
+
+static bool mlp_features_in_range_triple(const double f[6])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.001 || f[2] > 0.95) return false;
+    if (f[3] < 0.0 || f[3] > 0.9999) return false;
+    if (f[4] < 0.0 || f[4] > 0.9999) return false;
+    if (f[5] < 0.0 || f[5] > 1.0) return false;
+    return true;
+}
+
+static bool mlp_features_in_range_quad_3p1(const double f[11])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.01 || f[2] > 50.0) return false;
+    if (f[3] < 0.001 || f[3] > 0.95) return false;
+    if (f[4] < 0.001 || f[4] > 0.95) return false;
+    if (f[5] < 0.0 || f[5] > 0.9999) return false;
+    if (f[6] < 0.0 || f[6] > 0.9999) return false;
+    if (f[7] < 0.0 || f[7] > 0.9999) return false;
+    if (f[8] < 0.0 || f[8] > 1.0) return false;
+    if (f[9] < 0.0 || f[9] > 1.0) return false;
+    if (f[10] < 0.0 || f[10] > 1.0) return false;
+    return true;
+}
+
+static bool mlp_features_in_range_quad_2p2(const double f[11])
+{
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 1.0) return false;
+    if (f[2] < 0.01 || f[2] > 1.0) return false;
+    if (f[3] < 0.001 || f[3] > 0.95) return false;
+    if (f[4] < 0.001 || f[4] > 0.95) return false;
+    if (f[5] < 0.0 || f[5] > 0.9999) return false;
+    if (f[6] < 0.0 || f[6] > 0.9999) return false;
+    if (f[7] < 0.0 || f[7] > 0.9999) return false;
+    if (f[8] < 0.0 || f[8] > 1.0) return false;
+    if (f[9] < 0.0 || f[9] > 1.0) return false;
+    if (f[10] < 0.0 || f[10] > 1.0) return false;
+    return true;
+}
 
 extern "C"
 {
@@ -689,7 +736,14 @@ void set_up_derived_quantities(ParticlesMap *particlesMap)
             p->r = norm3(p->r_vec);
             p->r_p2 = p->r*p->r;
             p->r_p3 = p->r*p->r_p2;
-            p->r_pm1 = 1.0/p->r;
+            if (p->r > 0.0)
+            {
+                p->r_pm1 = 1.0/p->r;
+            }
+            else
+            {
+                p->r_pm1 = 0.0;
+            }
             p->r_pm2 = p->r_pm1*p->r_pm1;
             p->r_pm3 = p->r_pm1*p->r_pm2;
             
@@ -729,8 +783,24 @@ bool check_system_for_dynamical_stability(ParticlesMap *particlesMap, int *integ
             a_in = p->a;
             e_in = p->e;
             M_p = p->mass;
+
+            /* Guard: if orbital elements are NaN or invalid, declare unstable
+             * so the system goes to (or stays in) N-body rather than crashing in secular. */
+            if (isnan(a_out) || isnan(a_in) || isnan(e_out) || isnan(e_in) ||
+                a_out <= 0.0 || a_in <= 0.0 || M_p <= 0.0)
+            {
+                stable = false;
+                #ifdef VERBOSE
+                if (verbose_flag > 0)
+                {
+                    printf("structure.cpp -- check_system_for_dynamical_stability -- invalid orbital elements (a_in %g a_out %g e_in %g e_out %g M_p %g), declaring unstable\n", a_in, a_out, e_in, e_out, M_p);
+                }
+                #endif
+                continue;
+            }
+
             rp_out = a_out*(1.0-e_out);
-                    
+
             if (p->dynamical_instability_criterion == 0) /* for mass ratios on the order of unity */
             {
                 /* Mardling & Aarseth 2001 */
@@ -749,6 +819,189 @@ bool check_system_for_dynamical_stability(ParticlesMap *particlesMap, int *integ
                 }
                 #endif
                 
+            }
+            else if (p->dynamical_instability_criterion == 4)
+            {
+                /* Vynatheya MLP stability classifier */
+                double P_unstable = 1.0; /* safe fallback: assume unstable */
+                bool mlp_out_of_range = false;
+
+                if (sibling->is_binary == false)
+                {
+                    Particle *c1 = (*particlesMap)[p->child1];
+                    Particle *c2 = (*particlesMap)[p->child2];
+                    bool c1_is_binary = c1->is_binary;
+                    bool c2_is_binary = c2->is_binary;
+
+                    if (!c1_is_binary && !c2_is_binary)
+                    {
+                        /* Triple */
+                        double m1 = c1->mass;
+                        double m2 = c2->mass;
+                        double m_comp = sibling->mass;
+
+                        if (m1 > 0.0 && m2 > 0.0 && M_p > 0.0 && a_out > 0.0)
+                        {
+                            double qi = (m1 < m2) ? m1/m2 : m2/m1;
+                            double qo = m_comp / M_p;
+                            double a_ratio = a_in / a_out;
+                            get_inclination_relative_to_parent(particlesMap, p->index, &rel_INCL);
+
+                            double features[6] = {qi, qo, a_ratio, e_in, e_out, rel_INCL / M_PI};
+                            if (mlp_features_in_range_triple(features))
+                            {
+                                P_unstable = mlp_predict_triple(features);
+                            }
+                            else
+                            {
+                                mlp_out_of_range = true;
+                                #ifdef VERBOSE
+                                if (verbose_flag > 0)
+                                {
+                                    printf("structure.cpp -- MLP triple features out of range, using MA01 fallback\n");
+                                }
+                                #endif
+                            }
+                        }
+                    }
+                    else
+                    {
+                        /* 3+1 quad: p is middle binary, one child is inner binary */
+                        Particle *P_inner = c1_is_binary ? c1 : c2;
+                        Particle *P_mid_body = c1_is_binary ? c2 : c1;
+
+                        Particle *P_inner_c1 = (*particlesMap)[P_inner->child1];
+                        Particle *P_inner_c2 = (*particlesMap)[P_inner->child2];
+
+                        double mi1 = P_inner_c1->mass;
+                        double mi2 = P_inner_c2->mass;
+                        double m_mid_comp = P_mid_body->mass;
+                        double m_out_comp = sibling->mass;
+                        double a_inner = P_inner->a;
+                        double e_inner = P_inner->e;
+
+                        if (mi1 > 0.0 && mi2 > 0.0 && P_inner->mass > 0.0 && M_p > 0.0 && a_inner > 0.0 && a_in > 0.0 && a_out > 0.0)
+                        {
+                            double qi = (mi1 < mi2) ? mi1/mi2 : mi2/mi1;
+                            double qm = m_mid_comp / P_inner->mass;
+                            double qo = m_out_comp / M_p;
+                            double alim = a_inner / a_in;
+                            double almo = a_in / a_out;
+
+                            double h_inner_norm = norm3(P_inner->h_vec);
+                            double h_mid_norm = norm3(p->h_vec);
+                            double h_out_norm = norm3(parent->h_vec);
+
+                            double cos_iim = (h_inner_norm > 0.0 && h_mid_norm > 0.0) ?
+                                dot3(P_inner->h_vec, p->h_vec) / (h_inner_norm * h_mid_norm) : 1.0;
+                            double cos_iio = (h_inner_norm > 0.0 && h_out_norm > 0.0) ?
+                                dot3(P_inner->h_vec, parent->h_vec) / (h_inner_norm * h_out_norm) : 1.0;
+                            double cos_imo = (h_mid_norm > 0.0 && h_out_norm > 0.0) ?
+                                dot3(p->h_vec, parent->h_vec) / (h_mid_norm * h_out_norm) : 1.0;
+
+                            if (cos_iim < -1.0) cos_iim = -1.0; if (cos_iim > 1.0) cos_iim = 1.0;
+                            if (cos_iio < -1.0) cos_iio = -1.0; if (cos_iio > 1.0) cos_iio = 1.0;
+                            if (cos_imo < -1.0) cos_imo = -1.0; if (cos_imo > 1.0) cos_imo = 1.0;
+
+                            double features[11] = {qi, qm, qo, alim, almo, e_inner, e_in, e_out,
+                                                   acos(cos_iim) / M_PI, acos(cos_iio) / M_PI, acos(cos_imo) / M_PI};
+                            if (mlp_features_in_range_quad_3p1(features))
+                            {
+                                P_unstable = mlp_predict_quad_3p1(features);
+                            }
+                            else
+                            {
+                                mlp_out_of_range = true;
+                                #ifdef VERBOSE
+                                if (verbose_flag > 0)
+                                {
+                                    printf("structure.cpp -- MLP 3+1 quad features out of range, using MA01 fallback\n");
+                                }
+                                #endif
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    /* 2+2 quad */
+                    Particle *P_sib_c1 = (*particlesMap)[sibling->child1];
+                    Particle *P_sib_c2 = (*particlesMap)[sibling->child2];
+
+                    Particle *c1 = (*particlesMap)[p->child1];
+                    Particle *c2 = (*particlesMap)[p->child2];
+
+                    double mi1_1 = c1->mass;
+                    double mi1_2 = c2->mass;
+                    double mi2_1 = P_sib_c1->mass;
+                    double mi2_2 = P_sib_c2->mass;
+                    double a_sib = sibling->a;
+                    double e_sib = sibling->e;
+
+                    if (mi1_1 > 0.0 && mi1_2 > 0.0 && mi2_1 > 0.0 && mi2_2 > 0.0 && M_p > 0.0 && sibling->mass > 0.0 && a_in > 0.0 && a_sib > 0.0 && a_out > 0.0)
+                    {
+                        double qi1 = (mi1_1 < mi1_2) ? mi1_1/mi1_2 : mi1_2/mi1_1;
+                        double qi2 = (mi2_1 < mi2_2) ? mi2_1/mi2_2 : mi2_2/mi2_1;
+                        double qo = (M_p < sibling->mass) ? M_p/sibling->mass : sibling->mass/M_p;
+                        double ali1o = a_in / a_out;
+                        double ali2o = a_sib / a_out;
+
+                        double h1_norm = norm3(p->h_vec);
+                        double h2_norm = norm3(sibling->h_vec);
+                        double ho_norm = norm3(parent->h_vec);
+
+                        double cos_i12 = (h1_norm > 0.0 && h2_norm > 0.0) ?
+                            dot3(p->h_vec, sibling->h_vec) / (h1_norm * h2_norm) : 1.0;
+                        double cos_i1o = (h1_norm > 0.0 && ho_norm > 0.0) ?
+                            dot3(p->h_vec, parent->h_vec) / (h1_norm * ho_norm) : 1.0;
+                        double cos_i2o = (h2_norm > 0.0 && ho_norm > 0.0) ?
+                            dot3(sibling->h_vec, parent->h_vec) / (h2_norm * ho_norm) : 1.0;
+
+                        if (cos_i12 < -1.0) cos_i12 = -1.0; if (cos_i12 > 1.0) cos_i12 = 1.0;
+                        if (cos_i1o < -1.0) cos_i1o = -1.0; if (cos_i1o > 1.0) cos_i1o = 1.0;
+                        if (cos_i2o < -1.0) cos_i2o = -1.0; if (cos_i2o > 1.0) cos_i2o = 1.0;
+
+                        double features[11] = {qi1, qi2, qo, ali1o, ali2o, e_in, e_sib, e_out,
+                                               acos(cos_i12) / M_PI, acos(cos_i1o) / M_PI, acos(cos_i2o) / M_PI};
+                        if (mlp_features_in_range_quad_2p2(features))
+                        {
+                            P_unstable = mlp_predict_quad_2p2(features);
+                        }
+                        else
+                        {
+                            mlp_out_of_range = true;
+                            #ifdef VERBOSE
+                            if (verbose_flag > 0)
+                            {
+                                printf("structure.cpp -- MLP 2+2 quad features out of range, using MA01 fallback\n");
+                            }
+                            #endif
+                        }
+                    }
+                }
+
+                if (mlp_out_of_range)
+                {
+                    /* Fall back to MA01 criterion */
+                    q_out = sibling->mass / M_p;
+                    get_inclination_relative_to_parent(particlesMap, p->index, &rel_INCL);
+                    double rp_out_crit_ma01 = compute_rp_out_crit_MA01(a_in, q_out, e_out, rel_INCL);
+                    if (rp_out < rp_out_crit_ma01)
+                    {
+                        stable = false;
+                    }
+                }
+                else if (P_unstable > MLP_INSTABILITY_ENTRY_THRESHOLD)
+                {
+                    stable = false;
+                }
+
+                #ifdef VERBOSE
+                if (verbose_flag > 1)
+                {
+                    printf("structure.cpp -- check_system_for_dynamical_stability -- MLP P_unstable %g stable %d mlp_out_of_range %d\n", P_unstable, stable, mlp_out_of_range);
+                }
+                #endif
             }
             else
             {

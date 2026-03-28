@@ -2272,9 +2272,10 @@ class test_mse():
             fig=pyplot.figure(figsize=(N_r*panel_length,N_r*panel_length))
             
             legend_elements = []
-            for k in range(15):
-                color,s,description = Tools.get_color_and_size_and_description_for_star(k,1.0)
-                legend_elements.append( lines.Line2D([0],[0], marker = 'o', markerfacecolor = color, color = 'w', markersize = 10 ,label="$\mathrm{%s}$"%description))
+            for k in range(16):
+                color,s,description,marker = Tools.get_color_and_size_and_description_for_star(k,1.0)
+                legend_elements.append( lines.Line2D([0],[0], marker=marker, markerfacecolor=color,
+                    markeredgecolor='black', color='w', markersize=10, label=r"$\mathrm{%s}$"%description))
 
             for index_log,log in enumerate(plot_log):
                 plot=fig.add_subplot(N_r,N_c,index_log+1)
@@ -2287,7 +2288,7 @@ class test_mse():
 
                 text = Tools.get_description_for_event_flag(event_flag,log["SNe_type"])
                 plot.set_title(text,fontsize=fontsize)
-                plot.annotate("$t\simeq %s\,\mathrm{Myr}$"%round(log["time"]*1e-6,2),xy=(0.1,0.9),xycoords='axes fraction',fontsize=fontsize)
+                plot.annotate(r"$t\simeq %s\,\mathrm{Myr}$"%round(log["time"]*1e-6,2),xy=(0.1,0.9),xycoords='axes fraction',fontsize=fontsize)
 
                 if index_log == 0:
                     plot.legend(handles = legend_elements, bbox_to_anchor = (-0.05, 1.50), loc = 'upper left', ncol = 5,fontsize=0.85*fontsize)
@@ -2986,18 +2987,19 @@ class test_mse():
         code.reset()
 
     def test24(self, args):
-        """H36: CE orbital energy formula uses pre-CE total-mass ECIRC as baseline.
+        """CE energy balance: post-CE orbit properties for circular and eccentric initial orbits.
+
+        H36 was reverted (2026-03-21): the BSE/COSMIC convention (CEFLAG-dependent core masses
+        for EORBI and ECIRC) is used. With CEFLAG=3 (total masses), EORBI and ECIRC use the
+        same mass convention, so post-CE separation is independent of initial eccentricity
+        (ratio ~ 1.0). See logs/v3.1/phase5/h36_investigation.md.
 
         Test 24a: Post-CE orbit is circular (e ~ 0) for a circular initial orbit.
-        Test 24b: Eccentric initial orbit yields a tighter post-CE binary than a
-                  circular one, consistent with the H36 ECIRC formula:
-                    EORBF = EORBI_total / (1 - e^2) + EBIND / alpha
-                  so for e > 0: ECIRC > EORBI_total -> EORBF is larger -> a_f is smaller.
-        Test 24c: The semi-major axis ratio satisfies the H36 lower bound:
-                    a_f(e) / a_f(0) >= (1 - e^2)
-                  which is tight only when EBIND = 0, and approaches 1 as EBIND -> inf.
+        Test 24b: Post-CE orbit is circular for an eccentric initial orbit.
+        Test 24c: The semi-major axis ratio a_f(e)/a_f(0) is within [1-e^2, 1+eps],
+                  consistent with the self-consistent energy balance.
         """
-        print("Test H36: CE orbital energy formula with eccentric initial orbit")
+        print("Test 24: CE energy balance with eccentric initial orbit")
 
         M1, M2 = 5.0, 0.8   # stellar masses [M_sun]; primary is a giant (type 5)
         sma    = 0.3          # inner binary semi-major axis [AU] — triggers CE but survives
@@ -3062,10 +3064,9 @@ class test_mse():
         print("Test 24b passed")
 
         # ------------------------------------------------------------------ 24c
-        # The H36 formula gives: a_f(e)/a_f(0) in [(1-e^2), 1].
-        # When EBIND >> EORBI (typical for compact CE parameters), the ratio
-        # approaches 1.0 and the two a_f values are numerically indistinguishable.
-        # We verify the ratio lies within the theoretically allowed band.
+        # With BSE convention (same mass convention for EORBI and ECIRC),
+        # the ratio a_f(e)/a_f(0) should be close to 1.0 for CEFLAG=3.
+        # We verify the ratio lies within [1-e^2, 1+eps].
         e_test  = 0.5
         ratio   = a_f_ecc / a_f_circ
         lb      = 1.0 - e_test**2   # = 0.75
@@ -3074,11 +3075,10 @@ class test_mse():
             print("  Test 24c: ratio=%.6f  lower_bound=%.4f" % (ratio, lb))
 
         assert ratio >= lb - 1.0e-3, \
-            ("H36: a_f(e=0.5)/a_f(e=0.01) should be >= (1-e^2)=%.3f, got %.6f"
+            ("24c: a_f(e=0.5)/a_f(e=0.01) should be >= (1-e^2)=%.3f, got %.6f"
              % (lb, ratio))
-        assert ratio <= 1.0 + 1.0e-6, \
-            ("H36: a_f(e=0.5)/a_f(e=0.01) should be <= 1.0 (eccentric orbit cannot "
-             "widen the post-CE orbit), got %.6f" % ratio)
+        assert ratio <= 1.0 + 1.0e-3, \
+            ("24c: a_f(e=0.5)/a_f(e=0.01) should be <= ~1.0, got %.6f" % ratio)
         print("Test 24c passed")
 
         print("Test passed")

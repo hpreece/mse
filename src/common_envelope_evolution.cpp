@@ -2,6 +2,40 @@
 
 #include "evolve.h"
 #include "common_envelope_evolution.h"
+#include "mlp_forward_pass.h"
+
+#define MLP_INSTABILITY_ENTRY_THRESHOLD 0.5
+#define MLP_INSTABILITY_EXIT_THRESHOLD 0.3
+#define MLP_SCAN_N 20
+
+static bool mlp_features_in_range_triple(const double f[6])
+{
+    /* f: qi, qo, a_ratio, e_in, e_out, i_mut/pi */
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.001 || f[2] > 0.95) return false;
+    if (f[3] < 0.0 || f[3] > 0.9999) return false;
+    if (f[4] < 0.0 || f[4] > 0.9999) return false;
+    if (f[5] < 0.0 || f[5] > 1.0) return false;
+    return true;
+}
+
+static bool mlp_features_in_range_quad_3p1(const double f[11])
+{
+    /* f: qi, qm, qo, alim, almo, ei, em, eo, iim/pi, iio/pi, imo/pi */
+    if (f[0] < 0.01 || f[0] > 1.0) return false;
+    if (f[1] < 0.01 || f[1] > 50.0) return false;
+    if (f[2] < 0.01 || f[2] > 50.0) return false;
+    if (f[3] < 0.001 || f[3] > 0.95) return false;
+    if (f[4] < 0.001 || f[4] > 0.95) return false;
+    if (f[5] < 0.0 || f[5] > 0.9999) return false;
+    if (f[6] < 0.0 || f[6] > 0.9999) return false;
+    if (f[7] < 0.0 || f[7] > 0.9999) return false;
+    if (f[8] < 0.0 || f[8] > 1.0) return false;
+    if (f[9] < 0.0 || f[9] > 1.0) return false;
+    if (f[10] < 0.0 || f[10] > 1.0) return false;
+    return true;
+}
 
 extern "C"
 {
@@ -206,14 +240,11 @@ void binary_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
 
     double EBINDI = M1 * (M1 - MC1)/(LAMB1 * R1);
 
-    /* H36: EORBI_total uses pre-CE total masses (M1, M2) for computing the equivalent
-     * circular orbit energy ECIRC.  EORBI may later be overridden to core masses (MC1,
-     * MC2) for the CEFLAG != 3 energy-budget convention -- see BSE / HTP02 -- but ECIRC
-     * must always be derived from the actual pre-CE orbit (total masses) to correctly
-     * represent the angular-momentum-equivalent circular orbit and to properly
-     * circularize eccentric orbits during CE. */
-    double EORBI = M1 * M2/(2.0 * SEP); // use primary total mass and secondary total mass (HTP02 eq. 69)
-    double EORBI_total = EORBI;          // save pre-CE total-mass orbital energy for ECIRC
+    /* H36 reverted: use core masses for the energy balance following the standard
+     * BSE/COSMIC/COMPAS convention (CEFLAG-dependent). The core masses represent the
+     * objects that remain in the orbit after CE — using total masses would double-count
+     * the envelope's gravitational contribution to the orbital energy. */
+    double EORBI = M1 * M2/(2.0 * SEP);
 
     /*
     * If the secondary star is also giant-like, add its envelope's energy.
@@ -223,31 +254,22 @@ void binary_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
     {
         EBINDI += M2 * (M2 - MC2) / (LAMB2 * R2);
 
-        if(CEFLAG != 3) // use primary core mass instead of total mass
+        if(CEFLAG != 3) // use core masses
         {
-            EORBI = MC1 * MC2/(2.0 * SEP); // secondary is giant; use its core mass
+            EORBI = MC1 * MC2/(2.0 * SEP);
         }
     }
     else
     {
-        if(CEFLAG !=  3) // use primary core mass instead of total mass
+        if(CEFLAG != 3) // use primary core mass, secondary total mass
         {
-            EORBI = MC1 * M2/(2.0 * SEP); // secondary is not a giant; use its total mass
+            EORBI = MC1 * M2/(2.0 * SEP);
         }
     }
 
-    /* H36: Use pre-CE total masses for ECIRC so the circularised-orbit baseline is
-     * physically correct.  ECIRC = energy of the circular orbit sharing the same
-     * angular momentum as the pre-CE eccentric orbit (with total masses M1, M2). */
-    double ECIRC = EORBI_total/(1.0 - ECC*ECC); // equivalent circular orbit energy (pre-CE total masses)
+    double ECIRC = EORBI/(1.0 - ECC*ECC); // circular orbit energy (same mass convention as EORBI)
 
-    /* H36: Use ECIRC (not EORBI) as the initial-state baseline for the CE energy
-     * balance, matching the BSE reference (HTP02 eq. 71).  For a circular initial
-     * orbit (ECC = 0) ECIRC == EORBI_total and the formula reduces to the original.
-     * For eccentric orbits this correctly ensures that EORBF > ECIRC, so the post-CE
-     * orbit is always circularised (the eccentricity check at the end of this function
-     * will then set ECC = epsilon). */
-    double EORBF = ECIRC + EBINDI/ALPHA1; // Calculate the final orbital energy without coalescence (HTP02 eq. 71).
+    double EORBF = EORBI + EBINDI/ALPHA1; // energy balance (HTP02 eq. 71)
     double EBINDF;
 
     /* Generic variables */
@@ -1186,17 +1208,35 @@ void triple_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
 
     if (c1->is_binary == true or c2->is_binary == true)
     {
-        printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- at least of the components in the inner binary is itself a binary -- skipping. \n");
+        /* One or both children of the inner binary are themselves binaries.
+         * This is a quadruple CE (Case 2: outermost star engulfs inner triple,
+         * or 2+2 quad CE). The physics of these cases is too uncertain
+         * (frozen inner system assumption, multi-orbit energy budget).
+         * Skip for now, but log that it happened for rate tracking. */
+        bool is_case2 = (c1->is_binary == true) != (c2->is_binary == true); /* exactly one child is binary => 3+1 Case 2 */
+
+        #ifdef LOGGING
+        update_log_data(particlesMap, t, *integration_flag, LOG_QUADRUPLE_CE_START, log_info);
+        #endif
+
+        if (is_case2)
+        {
+            printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- 3+1 quad CE Case 2 (outermost engulfs triple) -- skipping (unsupported physics).\n");
+        }
+        else
+        {
+            printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- 2+2 quad CE -- skipping (unsupported physics).\n");
+        }
         return;
     }
-    
+
     if (*integration_flag != 0)
     {
         printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- integration flag is nonzero; skipping. \n");
         return;
     }
 
-    /* Define primary (star1) as the most massive star in the inner binary */
+    /* Define primary (star1) as the most massive star in the inner binary. */
     Particle *star1, *star2;
     if (c1->mass > c2->mass)
     {
@@ -1278,6 +1318,72 @@ void triple_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
     
     double a_out_f = MC3 * M_inner_binary/(2.0 * E_orb_out_f);
 
+    /* Guard: if the orbit is unbound after CE, strip the tertiary envelope
+     * (so stellar properties are correct for the subsequent N-body phase)
+     * and trigger N-body. */
+    if (a_out_f <= 0.0 || E_orb_out_f <= 0.0)
+    {
+        #ifdef VERBOSE
+        if (verbose_flag > 0)
+        {
+            printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- system unbound after CE (a_out_f %g E_orb_out_f %g) -- stripping envelope and triggering N-body\n", a_out_f * CONST_R_SUN, E_orb_out_f);
+        }
+        #endif
+
+        /* Strip the tertiary envelope even though the orbit is unbound.
+         * The stripped star will enter N-body with correct mass/type. */
+        double M3_f_unb = MC3;
+        int kw3_f_unb = kw3;
+        double M3_sse_init_f_unb = M3_sse_init;
+        double age3_f_unb = age3;
+        double R3_f_unb, L3_f_unb, MC3_f_unb, RC3_f_unb, M_env3_f_unb, R_env3_f_unb, k2_3_f_unb;
+
+        star_(&kw3_f_unb, &M3_sse_init_f_unb, &M3_f_unb, &tm3, &tn3, tscls3, lums3, GB3, zpars3);
+        hrdiag_(&M3_sse_init_f_unb, &age3_f_unb, &M3_f_unb, &tm3, &tn3, tscls3, lums3, GB3, zpars3,
+            &R3_f_unb, &L3_f_unb, &kw3_f_unb, &MC3_f_unb, &RC3_f_unb, &M_env3_f_unb, &R_env3_f_unb, &k2_3_f_unb);
+
+        star3->mass = M3_f_unb;
+        star3->stellar_type = kw3_f_unb;
+        star3->core_mass = MC3_f_unb;
+        star3->sse_initial_mass = M3_sse_init_f_unb;
+        star3->convective_envelope_mass = M_env3_f_unb;
+        star3->age = age3_f_unb * Myr_to_yr;
+        star3->epoch = t - star3->age;
+        star3->radius = R3_f_unb * CONST_R_SUN;
+        star3->core_radius = RC3_f_unb * CONST_R_SUN;
+        star3->convective_envelope_radius = R_env3_f_unb * CONST_R_SUN;
+        star3->luminosity = L3_f_unb * CONST_L_SUN;
+
+        /* Handle potential SNe kick from newly formed compact object */
+        if (kw3_f_unb >= 13 || (kw3_f_unb >= 10 && kw3_f_unb <= 12 && star3->include_WD_kicks == true))
+        {
+            star3->apply_kick = true;
+        }
+        star1->apply_kick = false;
+        star2->apply_kick = false;
+        star1->instantaneous_perturbation_delta_mass = 0.0;
+        star2->instantaneous_perturbation_delta_mass = 0.0;
+        star3->instantaneous_perturbation_delta_mass = 0.0;
+
+        set_binary_masses_from_body_masses(particlesMap);
+        set_positions_and_velocities(particlesMap);
+
+        bool unbound_orbits_unb;
+        handle_SNe_in_system(particlesMap, &unbound_orbits_unb, integration_flag);
+        reset_ODE_mass_dot_quantities(star3);
+
+        *integration_flag = 1;
+
+        #ifdef LOGGING
+        update_log_data(particlesMap, t, *integration_flag, LOG_TRIPLE_CE_END, log_info);
+        #endif
+
+        delete[] GB3;
+        delete[] tscls3;
+        delete[] lums3;
+        return;
+    }
+
     double e_out_f;
     if (E_orb_out_f < E_orb_out_circ_i)
     {
@@ -1292,20 +1398,363 @@ void triple_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
     /* Check if the new outer orbit would be wide enough to accommodate the inner binary. */
     double rel_INCL;
     get_inclination_relative_to_parent(particlesMap,inner_binary->index,&rel_INCL); /* Assume the mutual inclination does not change during the CE */
-    double rp_out_f_crit = compute_rp_out_crit_MA01(a_in_i, MC3/M_inner_binary, e_out_f, rel_INCL);
-    
+
+    int criterion = outer_binary->dynamical_instability_criterion;
     bool stable = false;
-    if (rp_out_f > rp_out_f_crit)
+    double a_park = 0.0; /* semi-major axis for parking orbit if unstable (RSun) */
+    double e_park = 0.0; /* eccentricity for parking orbit if unstable */
+
+    /* Detect if this triple is embedded in a 3+1 quadruple */
+    Particle *grandparent = NULL;
+    Particle *fourth_body = NULL;
+    bool embedded_in_3p1 = false;
+
+    if (outer_binary->parent >= 0)
     {
-        stable = true;
+        grandparent = (*particlesMap)[outer_binary->parent];
+        /* Find the sibling of outer_binary in the grandparent */
+        int sibling_index = (grandparent->child1 == outer_binary->index)
+            ? grandparent->child2 : grandparent->child1;
+        Particle *sibling = (*particlesMap)[sibling_index];
+        if (sibling->is_binary == false)
+        {
+            fourth_body = sibling;
+            embedded_in_3p1 = true;
+        }
     }
 
     #ifdef VERBOSE
-    if (verbose_flag > 0)
+    if (verbose_flag > 0 && embedded_in_3p1)
     {
-        printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- stability evaluation -- M3_CE_eff %g a_out_f %g e_out_f %g rp_out_f %g rp_out_f_crit %g stable %d\n",M3_CE_eff,a_out_f*CONST_R_SUN,e_out_f,rp_out_f*CONST_R_SUN,rp_out_f_crit*CONST_R_SUN,stable);
+        printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- 3+1 quad detected: 4th body index %d mass %g a_outer %g e_outer %g\n",
+            fourth_body->index, fourth_body->mass, grandparent->a, grandparent->e);
     }
     #endif
+
+    #ifdef LOGGING
+    if (embedded_in_3p1)
+    {
+        update_log_data(particlesMap, t, *integration_flag, LOG_QUADRUPLE_CE_START, log_info);
+    }
+    #endif
+
+    if (criterion == 0)
+    {
+        /* Mardling & Aarseth 2001 — apply to the inner triple only.
+         * The 3+1 MLP enhancement is opt-in via criterion=4. */
+        double rp_out_f_crit = compute_rp_out_crit_MA01(a_in_i, MC3/M_inner_binary, e_out_f, rel_INCL);
+        stable = (rp_out_f > rp_out_f_crit);
+        a_park = rp_out_f_crit / (1.0 - e_out_f);
+        e_park = e_out_f;
+
+        #ifdef VERBOSE
+        if (verbose_flag > 0)
+        {
+            printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- MA01 stability -- M3_CE_eff %g a_out_f %g e_out_f %g rp_out_f %g rp_out_f_crit %g stable %d\n",M3_CE_eff,a_out_f*CONST_R_SUN,e_out_f,rp_out_f*CONST_R_SUN,rp_out_f_crit*CONST_R_SUN,stable);
+        }
+        #endif
+    }
+    else if (criterion == 4)
+    {
+        /* Vynatheya MLP stability classifier.
+         * The MLP gives P(unstable) but not a critical separation.
+         * If unstable, bisect along the CE energy balance curve to find the
+         * stability boundary.  a_out and e_out are coupled through angular
+         * momentum conservation (E_orb_out_circ_i is fixed), so we bisect on
+         * a fractional energy parameter f in [0,1]:
+         *   f=0 -> E = E_orb_out_i  (no envelope energy deposited, widest orbit)
+         *   f=1 -> E = E_orb_out_f  (physical post-CE orbit) */
+
+        double delta_E = E_orb_out_f - E_orb_out_i; /* positive: orbit tightened */
+
+        /* Precompute mutual inclinations for 3+1 quad (inner-outer and middle-outer
+         * don't change during bisection; inner-middle = rel_INCL, also fixed). */
+        double incl_inner_outer = 0.0;
+        double incl_middle_outer = 0.0;
+
+        if (embedded_in_3p1)
+        {
+            double h_inner_norm = norm3(inner_binary->h_vec);
+            double h_mid_norm = norm3(outer_binary->h_vec);
+            double h_out_norm = norm3(grandparent->h_vec);
+
+            double cos_iio = (h_inner_norm > 0.0 && h_out_norm > 0.0) ?
+                dot3(inner_binary->h_vec, grandparent->h_vec) / (h_inner_norm * h_out_norm) : 1.0;
+            double cos_imo = (h_mid_norm > 0.0 && h_out_norm > 0.0) ?
+                dot3(outer_binary->h_vec, grandparent->h_vec) / (h_mid_norm * h_out_norm) : 1.0;
+
+            if (cos_iio < -1.0) cos_iio = -1.0; if (cos_iio > 1.0) cos_iio = 1.0;
+            if (cos_imo < -1.0) cos_imo = -1.0; if (cos_imo > 1.0) cos_imo = 1.0;
+
+            incl_inner_outer = acos(cos_iio);
+            incl_middle_outer = acos(cos_imo);
+        }
+
+        /* Helper lambda: compute MLP P(unstable) for a given energy fraction f.
+         * For triples, uses mlp_predict_triple (6 features).
+         * For 3+1 quads (Case 1), uses mlp_predict_quad_3p1 (11 features). */
+        auto mlp_eval_at_f = [&](double f, double *a_out_at_f, double *e_out_at_f) -> double
+        {
+            double E_at_f = E_orb_out_i + f * delta_E;
+            *a_out_at_f = MC3 * M_inner_binary / (2.0 * E_at_f);
+            if (E_at_f < E_orb_out_circ_i)
+            {
+                *e_out_at_f = sqrt(1.0 - E_at_f / E_orb_out_circ_i);
+            }
+            else
+            {
+                *e_out_at_f = epsilon;
+            }
+
+            if (embedded_in_3p1)
+            {
+                /* 3+1 quad MLP: 11 features */
+                double m1 = star1->mass;
+                double m2 = star2->mass;
+                double qi = (m1 < m2) ? m1/m2 : m2/m1;
+                double qm = MC3 / M_inner_binary;
+                double qo = fourth_body->mass / (M_inner_binary + MC3);
+                double alim = a_in_i / (*a_out_at_f);
+                double almo = (*a_out_at_f) / (grandparent->a / CONST_R_SUN);
+                double ei = inner_binary->e;
+                double em = *e_out_at_f;
+                double eo = grandparent->e;
+                double iim = rel_INCL / M_PI;
+                double iio = incl_inner_outer / M_PI;
+                double imo = incl_middle_outer / M_PI;
+
+                if (m1 <= 0.0 || m2 <= 0.0 || M_inner_binary <= 0.0 ||
+                    (M_inner_binary + MC3) <= 0.0 || a_in_i <= 0.0 ||
+                    (*a_out_at_f) <= 0.0 || grandparent->a <= 0.0)
+                {
+                    return 1.0; /* Assume unstable if any guard fails */
+                }
+
+                double features[11] = {qi, qm, qo, alim, almo, ei, em, eo, iim, iio, imo};
+                if (!mlp_features_in_range_quad_3p1(features))
+                {
+                    #ifdef VERBOSE
+                    if (verbose_flag > 0)
+                    {
+                        printf("common_envelope_evolution.cpp -- mlp_eval_at_f -- 3+1 quad features out of range, returning -1 for MA01 fallback\n");
+                    }
+                    #endif
+                    return -1.0; /* signal out-of-range */
+                }
+                return mlp_predict_quad_3p1(features);
+            }
+            else
+            {
+                /* Triple MLP: 6 features */
+                double m1 = star1->mass;
+                double m2 = star2->mass;
+                double qi = (m1 < m2) ? m1/m2 : m2/m1;
+                double qo = MC3 / M_inner_binary;
+                double e_in = inner_binary->e;
+                double a_ratio = a_in_i / (*a_out_at_f);
+                double features[6] = {qi, qo, a_ratio, e_in, *e_out_at_f, rel_INCL / M_PI};
+                if (!mlp_features_in_range_triple(features))
+                {
+                    #ifdef VERBOSE
+                    if (verbose_flag > 0)
+                    {
+                        printf("common_envelope_evolution.cpp -- mlp_eval_at_f -- triple features out of range, returning -1 for MA01 fallback\n");
+                    }
+                    #endif
+                    return -1.0; /* signal out-of-range */
+                }
+                return mlp_predict_triple(features);
+            }
+        };
+
+        /* Evaluate at the physical post-CE orbit */
+        double a_tmp, e_tmp;
+        double P_unstable = mlp_eval_at_f(1.0, &a_tmp, &e_tmp);
+
+        if (P_unstable < 0.0)
+        {
+            /* Features out of range — fall back to MA01 */
+            double rp_out_f_crit = compute_rp_out_crit_MA01(a_in_i, MC3/M_inner_binary, e_out_f, rel_INCL);
+            stable = (rp_out_f > rp_out_f_crit);
+            a_park = rp_out_f_crit / (1.0 - e_out_f);
+            e_park = e_out_f;
+
+            #ifdef VERBOSE
+            if (verbose_flag > 0)
+            {
+                printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- MLP features out of range, falling back to MA01\n");
+            }
+            #endif
+        }
+        else if (P_unstable <= MLP_INSTABILITY_ENTRY_THRESHOLD)
+        {
+            stable = true;
+        }
+        else
+        {
+            stable = false;
+
+            /* Scan+bisect: evaluate P(f) at N_SCAN equally spaced points,
+             * find all crossings of P = MLP_INSTABILITY_EXIT_THRESHOLD (0.3),
+             * then bisect the outermost crossing (closest to f=0, widest orbit). */
+            double P_scan[MLP_SCAN_N + 1];
+            double f_scan[MLP_SCAN_N + 1];
+            bool scan_has_oor = false; /* out-of-range encountered */
+
+            for (int k = 0; k <= MLP_SCAN_N; k++)
+            {
+                f_scan[k] = (double)k / (double)MLP_SCAN_N;
+                P_scan[k] = mlp_eval_at_f(f_scan[k], &a_tmp, &e_tmp);
+                if (P_scan[k] < 0.0) scan_has_oor = true;
+            }
+
+            if (scan_has_oor)
+            {
+                /* Out-of-range features encountered during scan — fall back to MA01 */
+                double rp_out_f_crit = compute_rp_out_crit_MA01(a_in_i, MC3/M_inner_binary, e_out_f, rel_INCL);
+                a_park = rp_out_f_crit / (1.0 - e_out_f);
+                e_park = e_out_f;
+
+                #ifdef VERBOSE
+                if (verbose_flag > 0)
+                {
+                    printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- MLP scan: out-of-range features, falling back to MA01\n");
+                }
+                #endif
+            }
+            else
+            {
+                /* Find all crossings of P = EXIT_THRESHOLD.
+                 * A crossing occurs between k and k+1 when P[k] and P[k+1]
+                 * are on opposite sides of the threshold. */
+                int outermost_crossing_lo = -1; /* index of the crossing closest to f=0 */
+                int n_crossings = 0;
+
+                for (int k = 0; k < MLP_SCAN_N; k++)
+                {
+                    bool below_k = (P_scan[k] < MLP_INSTABILITY_EXIT_THRESHOLD);
+                    bool below_k1 = (P_scan[k+1] < MLP_INSTABILITY_EXIT_THRESHOLD);
+                    if (below_k != below_k1)
+                    {
+                        n_crossings++;
+                        if (outermost_crossing_lo < 0)
+                        {
+                            outermost_crossing_lo = k;
+                        }
+                    }
+                }
+
+                #ifdef VERBOSE
+                if (verbose_flag > 0)
+                {
+                    printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- MLP scan: %d crossing(s) of P=%.2f found\n", n_crossings, MLP_INSTABILITY_EXIT_THRESHOLD);
+                }
+                #endif
+
+                bool all_stable = true;
+                for (int k = 0; k <= MLP_SCAN_N; k++)
+                {
+                    if (P_scan[k] >= MLP_INSTABILITY_EXIT_THRESHOLD)
+                    {
+                        all_stable = false;
+                        break;
+                    }
+                }
+
+                if (all_stable)
+                {
+                    /* Entire curve is below exit threshold — system is deeply stable.
+                     * Park at the physical post-CE orbit. */
+                    stable = true;
+                }
+                else if (n_crossings == 0)
+                {
+                    /* No crossings but not all stable: entire curve is unstable.
+                     * Fall back to MA01 for parking orbit. */
+                    double rp_out_f_crit = compute_rp_out_crit_MA01(a_in_i, MC3/M_inner_binary, e_out_f, rel_INCL);
+                    a_park = rp_out_f_crit / (1.0 - e_out_f);
+                    e_park = e_out_f;
+
+                    #ifdef VERBOSE
+                    if (verbose_flag > 0)
+                    {
+                        printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- MLP scan: entire curve unstable, falling back to MA01\n");
+                    }
+                    #endif
+                }
+                else
+                {
+                    /* Bisect the outermost crossing (closest to f=0 = widest orbit).
+                     * f_lo is below threshold, f_hi is above threshold (or vice versa). */
+                    double f_lo = f_scan[outermost_crossing_lo];
+                    double f_hi = f_scan[outermost_crossing_lo + 1];
+                    double P_lo = P_scan[outermost_crossing_lo];
+
+                    /* Ensure f_lo is the side below threshold */
+                    if (P_lo >= MLP_INSTABILITY_EXIT_THRESHOLD)
+                    {
+                        double tmp_f = f_lo; f_lo = f_hi; f_hi = tmp_f;
+                    }
+
+                    int max_iter = 50;
+                    double f_tol = 1.0e-4;
+
+                    for (int iter = 0; iter < max_iter; iter++)
+                    {
+                        double f_mid = 0.5 * (f_lo + f_hi);
+                        double a_mid_val, e_mid_val;
+                        double P_mid = mlp_eval_at_f(f_mid, &a_mid_val, &e_mid_val);
+
+                        if (P_mid >= MLP_INSTABILITY_EXIT_THRESHOLD)
+                        {
+                            f_hi = f_mid;
+                        }
+                        else
+                        {
+                            f_lo = f_mid;
+                        }
+
+                        if (f_hi - f_lo < f_tol)
+                        {
+                            break;
+                        }
+                    }
+
+                    /* Park at f_lo (just below exit threshold = stable side) */
+                    mlp_eval_at_f(f_lo, &a_park, &e_park);
+
+                    #ifdef VERBOSE
+                    if (verbose_flag > 0)
+                    {
+                        printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- MLP scan+bisect: f_crit %.6e a_park %g e_park %g n_crossings %d\n", f_lo, a_park * CONST_R_SUN, e_park, n_crossings);
+                    }
+                    #endif
+                }
+            }
+        }
+
+        #ifdef VERBOSE
+        if (verbose_flag > 0)
+        {
+            printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- MLP stability (%s) -- M3_CE_eff %g a_out_f %g e_out_f %g P_unstable %g stable %d\n",embedded_in_3p1 ? "3+1 quad" : "triple",M3_CE_eff,a_out_f*CONST_R_SUN,e_out_f,P_unstable,stable);
+        }
+        #endif
+    }
+    else
+    {
+        /* Unsupported criterion: fall back to MA01 */
+        double rp_out_f_crit = compute_rp_out_crit_MA01(a_in_i, MC3/M_inner_binary, e_out_f, rel_INCL);
+        stable = (rp_out_f > rp_out_f_crit);
+        a_park = rp_out_f_crit / (1.0 - e_out_f);
+        e_park = e_out_f;
+
+        #ifdef VERBOSE
+        if (verbose_flag > 0)
+        {
+            printf("common_envelope_evolution.cpp -- triple_common_envelope_evolution() -- unsupported criterion %d, falling back to MA01\n", criterion);
+        }
+        #endif
+    }
 
     /* Regardless of the outcome, assume the tertiary star is always stripped of its envelope.
      * Get properties of stripped tertiary star.
@@ -1397,10 +1846,11 @@ void triple_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
     }
     else
     {
-        /* Unstable; for the the N-body integration, park the inner binary
-         * at the unstable boundary (with previous eccentricity) */
-        a = rp_out_f_crit * CONST_R_SUN/(1.0-e_out_f);
-        e = e_out_f;
+        /* Unstable; for the N-body integration, park the inner binary
+         * at the stability boundary.  a_park and e_park were set by the
+         * stability evaluation above (MA01 or MLP bisection). */
+        a = a_park * CONST_R_SUN;
+        e = e_park;
     }
     
     double h = compute_h_from_a(M3_f,M_inner_binary,a,e);
@@ -1500,6 +1950,10 @@ void triple_common_envelope_evolution(ParticlesMap *particlesMap, int binary_ind
     log_info.index1 = index1;
     log_info.index2 = index2;
     update_log_data(particlesMap, t, *integration_flag, LOG_TRIPLE_CE_END, log_info);
+    if (embedded_in_3p1)
+    {
+        update_log_data(particlesMap, t, *integration_flag, LOG_QUADRUPLE_CE_END, log_info);
+    }
     #endif
     
 

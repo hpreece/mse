@@ -358,7 +358,7 @@ void compute_position_vectors_external_particle(ParticlesMap *particlesMap, Part
     #ifdef VERBOSE
     if (verbose_flag > 1)
     {
-        printf("external.cpp -- compute_position_vectors_external_particle -- r_per %g mean_anomaly %g total_internal_system_mass %g\n",r_per,mean_anomaly,total_internal_system_mass);
+        printf("external.cpp -- compute_position_vectors_external_particle -- r_per %g mean_anomaly %g total_internal_system_mass %g\n",*r_per,mean_anomaly,total_internal_system_mass);
     }
     #endif
 
