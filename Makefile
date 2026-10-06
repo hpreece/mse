@@ -79,7 +79,7 @@ LDFLAGS = -shared -lgfortran
 ### Do not change any of the lines below ###
 ############################################
 
-FFLAGS = -fPIC
+FFLAGS = -fPIC -O2
 
 all: $(COBJ) libmse.so
 

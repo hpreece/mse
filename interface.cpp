@@ -1307,6 +1307,27 @@ int set_verbose_flag(int value)
     return 0;
 }
 
+int get_binary_evolution_force_beta_mt(int *value)
+{
+    *value = binary_evolution_force_beta_mt;
+    return 0;
+}
+int set_binary_evolution_force_beta_mt(int value)
+{
+    binary_evolution_force_beta_mt = value;
+    return 0;
+}
+int get_binary_evolution_beta_mt_user(double *value)
+{
+    *value = binary_evolution_beta_mt_user;
+    return 0;
+}
+int set_binary_evolution_beta_mt_user(double value)
+{
+    binary_evolution_beta_mt_user = value;
+    return 0;
+}
+
 /***********
  * Testing *
  * ********/

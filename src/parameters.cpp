@@ -159,6 +159,9 @@ double nova_accretion_factor = 1.0e-3;
 double alpha_wind_accretion = 1.5;
 double beta_wind_accretion = 0.125;
 
+int binary_evolution_force_beta_mt = 0;
+double binary_evolution_beta_mt_user = 1.0;
+
 double triple_mass_transfer_primary_star_accretion_efficiency_no_disk = 0.1;
 double triple_mass_transfer_secondary_star_accretion_efficiency_no_disk = 0.1;
 double triple_mass_transfer_primary_star_accretion_efficiency_disk = 0.6;

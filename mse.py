@@ -113,7 +113,9 @@ class MSE(object):
         self._log_cache = None
         
         self.__verbose_flag = 0 ### 0: no verbose output in C++; > 0: verbose output, with increasing verbosity (>1 will slow down the code considerably)
-        
+        self.__binary_evolution_force_beta_mt = 0 ### 0: fiducial (KH-limited beta); 1: override with binary_evolution_beta_mt_user
+        self.__binary_evolution_beta_mt_user = 1.0 ### beta value applied when binary_evolution_force_beta_mt == 1; range [0, 1]
+
         self.enable_tides = True
         self.enable_root_finding = True
         self.enable_VRR = False
@@ -320,6 +322,12 @@ class MSE(object):
 
         self.lib.set_verbose_flag.argtypes = (ctypes.c_int,)
         self.lib.set_verbose_flag.restype = ctypes.c_int
+
+        self.lib.set_binary_evolution_force_beta_mt.argtypes = (ctypes.c_int,)
+        self.lib.set_binary_evolution_force_beta_mt.restype = ctypes.c_int
+
+        self.lib.set_binary_evolution_beta_mt_user.argtypes = (ctypes.c_double,)
+        self.lib.set_binary_evolution_beta_mt_user.restype = ctypes.c_int
 
         self.lib.initialize_code_interface.argtypes = ()
         self.lib.initialize_code_interface.restype = ctypes.c_int
@@ -826,6 +834,12 @@ class MSE(object):
     def __set_verbose_flag(self):
         self.lib.set_verbose_flag(self.verbose_flag)
 
+    def __set_binary_evolution_force_beta_mt(self):
+        self.lib.set_binary_evolution_force_beta_mt(self.__binary_evolution_force_beta_mt)
+
+    def __set_binary_evolution_beta_mt_user(self):
+        self.lib.set_binary_evolution_beta_mt_user(self.__binary_evolution_beta_mt_user)
+
     ### Logging ###
     def __get_log(self):
         N_log = self.lib.get_size_of_log_data()
@@ -1205,6 +1219,22 @@ class MSE(object):
     def verbose_flag(self, value):
         self.__verbose_flag = value
         self.__set_verbose_flag()
+
+    @property
+    def binary_evolution_force_beta_mt(self):
+        return self.__binary_evolution_force_beta_mt
+    @binary_evolution_force_beta_mt.setter
+    def binary_evolution_force_beta_mt(self, value):
+        self.__binary_evolution_force_beta_mt = value
+        self.__set_binary_evolution_force_beta_mt()
+
+    @property
+    def binary_evolution_beta_mt_user(self):
+        return self.__binary_evolution_beta_mt_user
+    @binary_evolution_beta_mt_user.setter
+    def binary_evolution_beta_mt_user(self, value):
+        self.__binary_evolution_beta_mt_user = value
+        self.__set_binary_evolution_beta_mt_user()
 
     @property
     def stop_after_root_found(self):
@@ -2397,7 +2427,7 @@ class Tools(object):
                             parent = particle_2.parent
                      
     @staticmethod
-    def evolve_system(configuration,N_bodies,masses,metallicities,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,tend,N_steps,stellar_types=None,make_plots=True,fancy_plots=False,plot_filename="test1",show_plots=True,object_types=None,random_seed=0,verbose_flag=0,include_WD_kicks=False,kick_distribution_sigma_km_s_WD=1.0,NS_model=0,ECSNe_model=0,kick_distribution_sigma_km_s_NS=265.0,kick_distribution_sigma_km_s_BH=50.0,flybys_stellar_density_per_cubic_pc=0.1,flybys_encounter_sphere_radius_au=1.0e5,flybys_stellar_relative_velocity_dispersion_km_s=30.0,flybys_include_secular_encounters=False,include_flybys=True,save_data=False,plot_only=False,wall_time_max_s=3.6e4,common_envelope_timescale=1.0e2,binary_evolution_SNe_Ia_single_degenerate_model=0,binary_evolution_SNe_Ia_double_degenerate_model=0,effective_radius_multiplication_factor_for_collisions_compact_objects=100.0,effective_radius_multiplication_factor_for_collisions_stars=1.0,tides_viscous_time_scale_prescription=1,dynamical_instability_criterion=0):  # [C49] mutable defaults
+    def evolve_system(configuration,N_bodies,masses,metallicities,semimajor_axes,eccentricities,inclinations,arguments_of_pericentre,longitudes_of_ascending_node,tend,N_steps,stellar_types=None,make_plots=True,fancy_plots=False,plot_filename="test1",show_plots=True,object_types=None,random_seed=0,verbose_flag=0,include_WD_kicks=False,kick_distribution_sigma_km_s_WD=1.0,NS_model=0,ECSNe_model=0,kick_distribution_sigma_km_s_NS=265.0,kick_distribution_sigma_km_s_BH=50.0,flybys_stellar_density_per_cubic_pc=0.1,flybys_encounter_sphere_radius_au=1.0e5,flybys_stellar_relative_velocity_dispersion_km_s=30.0,flybys_include_secular_encounters=False,include_flybys=True,save_data=False,plot_only=False,wall_time_max_s=3.6e4,common_envelope_timescale=1.0e2,binary_evolution_SNe_Ia_single_degenerate_model=0,binary_evolution_SNe_Ia_double_degenerate_model=0,effective_radius_multiplication_factor_for_collisions_compact_objects=100.0,effective_radius_multiplication_factor_for_collisions_stars=1.0,tides_viscous_time_scale_prescription=1,dynamical_instability_criterion=0,common_envelope_alpha=1.0,triple_common_envelope_alpha=1.0):  # [C49] mutable defaults; common_envelope_alpha + triple_common_envelope_alpha added for sensitivity-sweep variant control
 
         if stellar_types is None: stellar_types = []
         if object_types is None: object_types = []
@@ -2473,6 +2503,8 @@ class Tools(object):
                 b.kick_distribution_sigma_km_s_NS = kick_distribution_sigma_km_s_NS
                 b.kick_distribution_sigma_km_s_BH = kick_distribution_sigma_km_s_BH
                 b.common_envelope_timescale = common_envelope_timescale
+                b.common_envelope_alpha = common_envelope_alpha
+                b.triple_common_envelope_alpha = triple_common_envelope_alpha
                 b.tides_viscous_time_scale_prescription = tides_viscous_time_scale_prescription
 
             if dynamical_instability_criterion != 0:
@@ -2738,6 +2770,7 @@ class Tools(object):
                 data['L_print'] = L_print
                 data['rel_INCL_print'] = rel_INCL_print
                 data['spin_frequency_print'] = spin_frequency_print
+                data['t_V_print'] = t_V_print
 
                 import pickle
                 print("Saving output data to ",plot_filename + ".pkl")
@@ -2747,8 +2780,19 @@ class Tools(object):
                 except IOError:
                     print("Error saving output data to ",plot_filename + ".pkl; make sure the path exists and/or enough disk space is available.")
 
+            ### Now try the final-state log entry and re-save with it appended.
+            ### Guarded so a crash here does NOT lose the safety save above. ###
             try:
                 code.write_final_log_entry() ### This has to be done within Python, since the C++ code does not know if the desired Python simulation end time has been reached!
+                if save_data == True:
+                    try:
+                        new_entries = list(code.log)[len(log_copy_for_save):]
+                        if new_entries:
+                            data['log'] = log_copy_for_save + new_entries
+                            with open(plot_filename + ".pkl", 'wb') as file:
+                                pickle.dump(data, file)
+                    except Exception:
+                        print("WARNING -- mse.py -- could not append final log entry to saved pkl")
             except Exception:
                 print("WARNING -- mse.py -- write_final_log_entry() failed (C++ state may be corrupted after wall time exceeded)")
 

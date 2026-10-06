@@ -444,9 +444,36 @@ void check_for_roots(ParticlesMap *particlesMap, bool use_root_functions, realty
                 double cross_section = 0.0;
                 if (P_child1->is_binary == false and P_child2->is_binary == false)
                 {
-                    
-                    cross_section_function(P_child1,&cross_section);
-                    cross_section_function(P_child2,&cross_section);
+                    /* HPP 2026-06-20: collision-detection root (H2a).
+                     * Truncate each child's contribution to the cross-section
+                     * sum at its Eggleton Roche lobe (computed at periapsis)
+                     * when that child is in active stable MT (RLOF_flag=1).
+                     * The SSE-isolated radius during RLOF is a fiction (the
+                     * photosphere is physically truncated at L1 by ongoing
+                     * stripping); without this gate the collision root fires
+                     * spuriously once SSE inflates the donor past 'a',
+                     * routing what should be stable MT into CE-coalescence.
+                     *
+                     * IMPORTANT: this is the COLLISION root, NOT the
+                     * RLOF-onset detection root at line ~454 below. The
+                     * onset root MUST keep raw P_p->radius — if R_dyn leaks
+                     * there, the root sticks at f=0 and onset is never
+                     * cleanly detected. See MT_OVERMERGING_writeup.md §19. */
+                    double periapse_distance_for_RL = P_p->a * (1.0 - P_p->e);
+
+                    double q1 = P_child1->mass / CV_max(P_child2->mass, epsilon);
+                    double R_L_child1 = roche_radius_pericenter_eggleton(periapse_distance_for_RL, q1);
+                    double R_child1_eff = (P_child1->RLOF_flag == 1)
+                                          ? CV_min(P_child1->radius, R_L_child1)
+                                          : P_child1->radius;
+                    cross_section += determine_effective_radius_for_collision(R_child1_eff, P_child1->stellar_type, 0);
+
+                    double q2 = P_child2->mass / CV_max(P_child1->mass, epsilon);
+                    double R_L_child2 = roche_radius_pericenter_eggleton(periapse_distance_for_RL, q2);
+                    double R_child2_eff = (P_child2->RLOF_flag == 1)
+                                          ? CV_min(P_child2->radius, R_L_child2)
+                                          : P_child2->radius;
+                    cross_section += determine_effective_radius_for_collision(R_child2_eff, P_child2->stellar_type, 0);
                 }
                 else
                 {

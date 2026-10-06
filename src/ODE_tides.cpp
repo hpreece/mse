@@ -2,6 +2,7 @@
 
 #include "evolve.h"
 #include "ODE_tides.h"
+#include "ODE_root_finding.h" /* for roche_radius_pericenter_eggleton */
 #include "tools.h" /* for orbital_period */
 #include <stdio.h>
 
@@ -86,12 +87,19 @@ double from_k_AM_div_T_to_t_V(double k_AM_div_T, double apsidal_motion_constant)
     return 3.0 * f * f / k_AM_div_T;
 }
 
-double compute_t_V(Particle *star, Particle *companion, double semimajor_axis)
+double compute_t_V(Particle *star, Particle *companion, double semimajor_axis, double effective_radius)
 {
+    /* HPP 2026-06-19: §15 radius semantics.
+     * effective_radius is R_dyn = min(R_SSE, R_L) during stable RLOF, else R_SSE.
+     *   - Radiative branch (Zahn k_AM/T proportional to R*sqrt(Gm/a^5)): R is a
+     *     pure geometric coupling; R_dyn is correct per §15.
+     *   - Convective branch: BSE-faithful envelope cap applied (Site B); both
+     *     R_dyn and R_SSE are passed downstream, with R_SSE as fallback in
+     *     the degenerate case R_dyn - R_core <= 0. */
     int tides_viscous_time_scale_prescription = star->tides_viscous_time_scale_prescription;
 
     double t_V = 1.0e10; /* large value by default, i.e. weak tides if tides_viscous_time_scale_prescription is not given the correct value */
-    
+
     if (tides_viscous_time_scale_prescription == 0 or star->object_type != 1)
     {
         t_V = star->tides_viscous_time_scale;
@@ -105,13 +113,15 @@ double compute_t_V(Particle *star, Particle *companion, double semimajor_axis)
             star->convective_envelope_mass,
             companion->mass,
             semimajor_axis,
-            star->radius,
+            effective_radius,    /* R_dyn — radiative-branch geometric coupling */
+            star->radius,        /* R_SSE — fallback in degenerate envelope-cap cases */
             star->convective_envelope_radius,
+            star->core_radius,   /* core_radius — for BSE-faithful envelope cap */
             star->luminosity,
             star->spin_vec_norm,
             star->gyration_radius,
             star->apsidal_motion_constant
-        ); 
+        );
     }
     else if (tides_viscous_time_scale_prescription == 2)
     {
@@ -122,14 +132,16 @@ double compute_t_V(Particle *star, Particle *companion, double semimajor_axis)
             star->convective_envelope_mass,
             companion->mass,
             semimajor_axis,
-            star->radius,
+            effective_radius,    /* R_dyn — radiative-branch geometric coupling */
+            star->radius,        /* R_SSE — fallback in degenerate envelope-cap cases */
             star->convective_envelope_radius,
+            star->core_radius,   /* core_radius — for BSE-faithful envelope cap */
             star->luminosity,
             star->spin_vec_norm,
             star->gyration_radius,
             star->apsidal_motion_constant,
             star->metallicity
-        ); 
+        );
     }
     
     #ifdef VERBOSE
@@ -149,8 +161,10 @@ double compute_t_V_hurley
     double convective_envelope_mass,
     double companion_mass,
     double semimajor_axis,
-    double radius,
+    double radius,        /* R_dyn — radiative-branch geometric coupling */
+    double radius_sse,    /* R_SSE — fallback in degenerate envelope-cap cases */
     double convective_envelope_radius,
+    double core_radius,   /* core_radius — for BSE-faithful envelope cap (evolv2.f line 1813) */
     double luminosity,
     double spin_angular_frequency,
     double gyration_radius,
@@ -160,7 +174,7 @@ double compute_t_V_hurley
     #ifdef VERBOSE
     if (verbose_flag > 2)
     {
-        printf("ODE_tides.cpp -- compute_t_V_hurley kw %d m %g menv %g mcomp %g a %g r %g renv %g lum %g omega %g rg %g kam %g \n",stellar_type,mass,convective_envelope_mass,companion_mass,semimajor_axis,radius,convective_envelope_radius,luminosity,spin_angular_frequency,gyration_radius,apsidal_motion_constant);
+        printf("ODE_tides.cpp -- compute_t_V_hurley kw %d m %g menv %g mcomp %g a %g r %g r_sse %g renv %g rc %g lum %g omega %g rg %g kam %g \n",stellar_type,mass,convective_envelope_mass,companion_mass,semimajor_axis,radius,radius_sse,convective_envelope_radius,core_radius,luminosity,spin_angular_frequency,gyration_radius,apsidal_motion_constant);
     }
     #endif
     
@@ -250,13 +264,24 @@ double compute_t_V_hurley
             P_spin = TWOPI/spin_angular_frequency;
             P_tid = 1.0/( 1e-10 + fabs( 1.0/P_orb - 1.0/P_spin) );
         }
-        double radius_arg = (radius - (1.0/2.0)*convective_envelope_radius);
+        /* HPP 2026-06-22: BSE-faithful envelope cap (evolv2.f line 1813).
+         * Truncate the convective envelope at R_dyn - R_core before computing
+         * tau_conv, and use R_dyn as the surface scale. Falls back to uncapped
+         * renv with R_SSE if R_dyn - R_core <= 0 (degenerate case). */
+        double convective_envelope_radius_eff = convective_envelope_radius;
+        double radius_for_tau = radius_sse;
+        if (radius < radius_sse and radius - core_radius > 0.0)
+        {
+            convective_envelope_radius_eff = CV_min(convective_envelope_radius, radius - core_radius);
+            radius_for_tau = radius;
+        }
+        double radius_arg = (radius_for_tau - (1.0/2.0)*convective_envelope_radius_eff);
         if (radius_arg <= 0.0)
         {
-            radius_arg = convective_envelope_radius;
+            radius_arg = convective_envelope_radius_eff;
         }
-            
-        double tau_convective = pow( (convective_envelope_mass*convective_envelope_radius*radius_arg)/(3.0*luminosity), 1.0/3.0);
+
+        double tau_convective = pow( (convective_envelope_mass*convective_envelope_radius_eff*radius_arg)/(3.0*luminosity), 1.0/3.0);
 
         double f_convective = pow(P_tid/(2.0*tau_convective),2.0);
         f_convective = CV_min(1.0,f_convective);
@@ -284,23 +309,25 @@ double compute_t_V_preece
     double convective_envelope_mass,
     double companion_mass,
     double semimajor_axis,
-    double radius,
+    double radius,        /* R_dyn — radiative-branch geometric coupling */
+    double radius_sse,    /* R_SSE — fallback in degenerate envelope-cap cases */
     double convective_envelope_radius,
+    double core_radius,   /* core_radius — for BSE-faithful envelope cap (evolv2.f line 1813) */
     double luminosity,
     double spin_angular_frequency,
     double gyration_radius,
     double apsidal_motion_constant,
     double metallicity
-    
+
 
 )
 {
     /* "Preece" prescription -- https://ui.adsabs.harvard.edu/abs/2022arXiv220606068P/abstract */
-    
+
     #ifdef VERBOSE
     if (verbose_flag > 2)
     {
-        printf("ODE_tides.cpp -- compute_t_V_preece kw %d m %g menv %g mcomp %g a %g r %g renv %g lum %g omega %g rg %g kam %g \n",stellar_type,mass,convective_envelope_mass,companion_mass,semimajor_axis,radius,convective_envelope_radius,luminosity,spin_angular_frequency,gyration_radius,apsidal_motion_constant);
+        printf("ODE_tides.cpp -- compute_t_V_preece kw %d m %g menv %g mcomp %g a %g r %g r_sse %g renv %g rc %g lum %g omega %g rg %g kam %g \n",stellar_type,mass,convective_envelope_mass,companion_mass,semimajor_axis,radius,radius_sse,convective_envelope_radius,core_radius,luminosity,spin_angular_frequency,gyration_radius,apsidal_motion_constant);
     }
     #endif
     
@@ -340,18 +367,30 @@ double compute_t_V_preece
             P_spin = TWOPI/spin_angular_frequency;
             P_tid = 1.0/( 1e-10 + fabs( 1.0/P_orb - 1.0/P_spin) );
         }
-        double radius_arg = (radius - (1.0/2.0)*convective_envelope_radius);
+        /* HPP 2026-06-22: BSE-faithful envelope cap (evolv2.f line 1813).
+         * Truncate the convective envelope at R_dyn - R_core, then compute
+         * tau_conv and mrtid from the capped envelope with R_dyn as the
+         * surface scale. Falls back to uncapped renv with R_SSE in the
+         * degenerate case R_dyn - R_core <= 0. */
+        double convective_envelope_radius_eff = convective_envelope_radius;
+        double radius_for_tau = radius_sse;
+        if (radius < radius_sse and radius - core_radius > 0.0)
+        {
+            convective_envelope_radius_eff = CV_min(convective_envelope_radius, radius - core_radius);
+            radius_for_tau = radius;
+        }
+        double radius_arg = (radius_for_tau - (1.0/2.0)*convective_envelope_radius_eff);
         if (radius_arg <= 0.0)
         {
-            radius_arg = convective_envelope_radius;
+            radius_arg = convective_envelope_radius_eff;
         }
-            
-        double tau_convective = pow( (3.0*convective_envelope_mass*convective_envelope_radius*convective_envelope_radius)/(luminosity), 1.0/3.0);
+
+        double tau_convective = pow( (3.0*convective_envelope_mass*convective_envelope_radius_eff*convective_envelope_radius_eff)/(luminosity), 1.0/3.0);
         double logz = log10(metallicity);
         double atid = 2.72 + (0.063*logz);
         double btid = 0.68 + (-0.219*logz);
         double ctid = 0.12 + (-0.023*logz);
-        double mrtid = pow((convective_envelope_radius/radius),atid) * pow((convective_envelope_mass/mass),btid) * ctid;
+        double mrtid = pow((convective_envelope_radius_eff/radius_for_tau),atid) * pow((convective_envelope_mass/mass),btid) * ctid;
         
         double f_convective = pow(P_tid/(2.0*tau_convective),2.0);
         f_convective = CV_min(1.0,f_convective);
@@ -449,22 +488,48 @@ double compute_EOM_equilibrium_tide_BO_full(ParticlesMap *particlesMap, int bina
     double *spin_vec = star->spin_vec;
     double M = star->mass;
     double m = companion->mass;
-    double R = star->radius;
-    
+
+    /* HPP 2026-06-20: split SSE-isolated radius from the photospherically-
+     * relevant radius for orbital dynamics. R_SSE feeds STRUCTURAL quantities
+     * (fall-through if envelope cap degenerate); R feeds GEOMETRIC tidal
+     * couplings ((R/a)^n, compute_t_V's effective_radius) and is also used
+     * for I (faithful to BSE evolv2.f line 1864). During stable RLOF
+     * (star->RLOF_flag=1) R is truncated at the Eggleton Roche-lobe radius
+     * computed at periapsis; outside RLOF the two are identical. */
+    double R_SSE = star->radius;
+    double R;
+    if (star->RLOF_flag == 1 and companion->mass > epsilon)
+    {
+        double _rp = a * (1.0 - e);
+        double _q = M / companion->mass;
+        double _R_L_eggleton = roche_radius_pericenter_eggleton(_rp, _q);
+        /* HPP 2026-06-22: core-radius floor (BSE radx = MAX(radc, rol)). */
+        R = CV_max(star->core_radius, CV_min(R_SSE, _R_L_eggleton));
+    }
+    else
+    {
+        R = R_SSE;
+    }
+
     double k_AM;
     double I; // moment of intertia
-    if (star->object_type == 1) // star 
+    if (star->object_type == 1) // star
     {
+        /* HPP 2026-06-22: I uses R_dyn during RLOF, faithful to BSE
+         * (evolv2.f line 1864). */
         I = compute_moment_of_inertia(star->stellar_type, M, star->core_mass, R, star->core_radius, star->sse_k2, star->sse_k3);
         k_AM = compute_apsidal_motion_constant(star);
     }
     else
     {
+        /* HPP 2026-06-22: gyration-radius fallback also uses R_dyn (BSE). */
         I = star->gyration_radius*M*R*R;
         k_AM = star->apsidal_motion_constant;
     }
 
-    double t_V = compute_t_V(star,companion,a);
+    /* Pass R (= R_dyn during RLOF) to compute_t_V so both (R/a)^8 and t_V
+     * see the same truncated photospheric radius. Single source of truth. */
+    double t_V = compute_t_V(star,companion,a,R);
     star->tides_viscous_time_scale = t_V;
 
     #ifdef VERBOSE
@@ -793,19 +858,40 @@ double compute_EOM_equilibrium_tide(ParticlesMap *particlesMap, int binary_index
     double M = star->mass;
     double m = companion->mass;
     double mu = m*M/(m+M);
-    double R = star->radius;
+
+    /* HPP 2026-06-20: same R_SSE/R_dyn split as in compute_EOM_equilibrium_tide_BO_full.
+     * R_SSE → structural fallback; R → geometric coupling and I (faithful to BSE
+     * evolv2.f line 1864). See MT_OVERMERGING_writeup.md §9 H1+H2b and §15. */
+    double R_SSE = star->radius;
+    double R;
+    if (star->RLOF_flag == 1 and companion->mass > epsilon)
+    {
+        double _rp = a * (1.0 - e);
+        double _q = M / companion->mass;
+        double _R_L_eggleton = roche_radius_pericenter_eggleton(_rp, _q);
+        /* HPP 2026-06-22: core-radius floor (BSE radx = MAX(radc, rol)). */
+        R = CV_max(star->core_radius, CV_min(R_SSE, _R_L_eggleton));
+    }
+    else
+    {
+        R = R_SSE;
+    }
+
     double k_AM = star->apsidal_motion_constant;
-    double t_V = compute_t_V(star,companion,a);
+    double t_V = compute_t_V(star,companion,a,R);
     star->tides_viscous_time_scale = t_V;
     double rg = star->gyration_radius;
     double I;
-    if (star->object_type == 1) // star 
+    if (star->object_type == 1) // star
     {
+        /* HPP 2026-06-22: I uses R_dyn during RLOF, faithful to BSE
+         * (evolv2.f line 1864). */
         I = compute_moment_of_inertia(star->stellar_type, M, star->core_mass, R, star->core_radius, star->sse_k2, star->sse_k3);
         k_AM = compute_apsidal_motion_constant(star);
     }
     else
     {
+        /* HPP 2026-06-22: gyration-radius fallback also uses R_dyn (BSE). */
         I = star->gyration_radius*M*R*R;
         k_AM = star->apsidal_motion_constant;
     }

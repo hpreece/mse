@@ -1,6 +1,6 @@
 ***
       SUBROUTINE evolv1(kw,mass,mt,r,lum,mc,rc,menv,renv,ospin,
-     &                  epoch,tm,tphys,tphysf,dtp,z,zpars,k2)
+     &                  epoch,tm,tphys,tphysf,dtp,z,zpars,k2,r_eff)
 c-------------------------------------------------------------c
 c
 c     Evolves a single star.
@@ -45,6 +45,14 @@ c-------------------------------------------------------------c
       real*8 mt,tm,tn,tphysf,dtp,tsave
       real*8 tscls(20),lums(10),GB(10),zpars(20)
       real*8 r,lum,mc,teff,rc,menv,renv,vs(3)
+*     HPP 2026-06-22: r_eff = effective photospheric radius for orbital coupling
+*     during RLOF (= R_dyn = min(R_SSE, R_L_eggleton)).  r_eff_local is the
+*     value used in the four orbital-coupling sites below.  Sentinel: r_eff
+*     <= 0 means caller did not specify; use r in that case.  Faithful to
+*     BSE evolv2.f: substitute radx (= r_eff) at the wind rate, the Jeans-
+*     wind spin-J term, and the jspin/ospin relation; structural quantities
+*     (k2, k3, dtm, HRD output) keep r.
+      real*8 r_eff, r_eff_local
       real*8 ospin,jspin,djt,djmb,k2,k3
       parameter(k3=0.21d0)
       real*8 m0,r1,lum1,mc1,rc1,menv1,renv1,k21
@@ -100,7 +108,10 @@ c-------------------------------------------------------------c
 * Calculate mass loss from the previous timestep.
 *
             dt = 1.0d+06*dtm
-            dms = mlwind(kw,lum,r,mt,mc,rl,z)*dt
+*           HPP 2026-06-22: BSE-faithful radx substitution for orbital coupling
+            r_eff_local = r
+            if (r_eff .gt. 0.d0 .and. r_eff .lt. r) r_eff_local = r_eff
+            dms = mlwind(kw,lum,r_eff_local,mt,mc,rl,z)*dt
             if(kw.lt.10)then
                dml = mt - mc
                if(dml.lt.dms)then
@@ -123,7 +134,13 @@ c-------------------------------------------------------------c
 * and/or mass loss.
 *
          if(j.gt.1)then
-            djt = (2.d0/3.d0)*(dms/(1.0d+06*dtm))*r*r*ospin
+*           HPP 2026-06-22: Jeans-wind spin-J term uses r_eff (BSE radx).
+*           Magnetic-braking djmb is a structural quantity (penv*L driven) and
+*           keeps r.
+            r_eff_local = r
+            if (r_eff .gt. 0.d0 .and. r_eff .lt. r) r_eff_local = r_eff
+            djt = (2.d0/3.d0)*(dms/(1.0d+06*dtm))*
+     &            r_eff_local*r_eff_local*ospin
             if(mt.gt.0.35d0.and.kw.lt.10)then
                djmb = 5.83d-16*menv*(r*ospin)**3/mt
                djt = djt + djmb
@@ -229,10 +246,19 @@ c-------------------------------------------------------------c
             if(tphys.lt.tiny.and.ospin.lt.0.001d0)then
                ospin = 45.35d0*vrotf(mt)/r
             endif
-            jspin = ospin*(k2*r*r*(mt-mc)+k3*rc*rc*mc)
+*           HPP 2026-06-22: jspin / ospin use r_eff in the envelope term
+*           (BSE radx; line 2074-2075 in evolv2.f).  k2, k3, mc, rc are
+*           structural quantities kept at SSE values.
+            r_eff_local = r
+            if (r_eff .gt. 0.d0 .and. r_eff .lt. r) r_eff_local = r_eff
+            jspin = ospin*(k2*r_eff_local*r_eff_local*(mt-mc)+
+     &              k3*rc*rc*mc)
          else
             jspin = MAX(1.0d-10,jspin - djt*1.0d+06*dtm)
-            ospin = jspin/(k2*r*r*(mt-mc)+k3*rc*rc*mc)
+            r_eff_local = r
+            if (r_eff .gt. 0.d0 .and. r_eff .lt. r) r_eff_local = r_eff
+            ospin = jspin/(k2*r_eff_local*r_eff_local*(mt-mc)+
+     &              k3*rc*rc*mc)
          endif
 *
 * Test for changes in evolution type.

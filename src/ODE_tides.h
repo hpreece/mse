@@ -9,7 +9,7 @@ bool check_for_convective_damping(int stellar_type);
 
 double from_k_AM_div_T_to_t_V(double k_AM_div_T, double apsidal_motion_constant);
 
-double compute_t_V(Particle *star, Particle *companion, double semimajor_axis);
+double compute_t_V(Particle *star, Particle *companion, double semimajor_axis, double effective_radius);
 double compute_t_V_hurley
 (
     int stellar_type,
@@ -18,7 +18,9 @@ double compute_t_V_hurley
     double companion_mass,
     double semimajor_axis,
     double radius,
+    double radius_sse,
     double convective_envelope_radius,
+    double core_radius,
     double luminosity,
     double spin_angular_frequency,
     double gyration_radius,
@@ -32,7 +34,9 @@ double compute_t_V_preece
     double companion_mass,
     double semimajor_axis,
     double radius,
+    double radius_sse,
     double convective_envelope_radius,
+    double core_radius,
     double luminosity,
     double spin_angular_frequency,
     double gyration_radius,

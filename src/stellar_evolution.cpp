@@ -112,7 +112,9 @@ int initialize_stars(ParticlesMap *particlesMap)
             if (kw_desired == 0 or kw_desired == 1) /* ZAMS star; no aging */
             {
                 kw = kw_desired;
-                evolv1_(&kw,&sse_initial_mass,&mt,&r,&lum,&mc,&rc,&menv,&renv,&ospin,&epoch,&tms,&tphys,&tphysf,&dtp,&z,zpars,&k2);
+                /* HPP 2026-06-22: r_eff sentinel = 0; star is at ZAMS, no RLOF. */
+                double r_eff_sse = 0.0;
+                evolv1_(&kw,&sse_initial_mass,&mt,&r,&lum,&mc,&rc,&menv,&renv,&ospin,&epoch,&tms,&tphys,&tphysf,&dtp,&z,zpars,&k2,&r_eff_sse);
             }
             else /* age star until reaching desired stellar type */
             {
@@ -128,7 +130,9 @@ int initialize_stars(ParticlesMap *particlesMap)
                     }
                     #endif
 
-                    evolv1_(&kw,&sse_initial_mass,&mt,&r,&lum,&mc,&rc,&menv,&renv,&ospin,&epoch,&tms,&tphys,&tphysf,&dtp,&z,zpars,&k2);
+                    /* HPP 2026-06-22: r_eff sentinel = 0; star is in initial spin-up loop, RLOF state not yet established. */
+                    double r_eff_sse = 0.0;
+                    evolv1_(&kw,&sse_initial_mass,&mt,&r,&lum,&mc,&rc,&menv,&renv,&ospin,&epoch,&tms,&tphys,&tphysf,&dtp,&z,zpars,&k2,&r_eff_sse);
                     check_sse_error_codes();
                     age = tphysf - epoch;
 
@@ -349,7 +353,41 @@ int evolve_stars(ParticlesMap *particlesMap, double start_time, double end_time,
             }
             else
             {
-                evolv1_(&kw,&sse_initial_mass,&mt,&r,&lum,&mc,&rc,&menv,&renv,&ospin,&epoch,&tms,&tphys,&tphysf,&dtp,&z,zpars,&k2);
+                /* HPP 2026-06-22: compute r_eff = R_dyn (in solar units) for the
+                 * BSE-faithful wind / spin-J treatment during RLOF.  Sentinel
+                 * r_eff_sse = 0 means evolv1.f uses the SSE radius itself.
+                 * Walk parent binary if RLOF_flag == 1 and parent is a binary
+                 * with a valid sibling; otherwise leave sentinel. */
+                double r_eff_sse = 0.0;
+                if (p->RLOF_flag == 1 and p->parent != -1)
+                {
+                    ParticlesMapIterator it_par = particlesMap->find(p->parent);
+                    if (it_par != particlesMap->end())
+                    {
+                        Particle *parent_binary = it_par->second;
+                        if (parent_binary != NULL and parent_binary->is_binary == true and p->sibling != -1)
+                        {
+                            ParticlesMapIterator it_sib = particlesMap->find(p->sibling);
+                            if (it_sib != particlesMap->end())
+                            {
+                                Particle *sibling = it_sib->second;
+                                if (sibling != NULL and sibling->mass > epsilon)
+                                {
+                                    double rp_au = parent_binary->a * (1.0 - parent_binary->e);
+                                    double q_eg  = p->mass / sibling->mass;
+                                    double R_L_eggleton_cgs = roche_radius_pericenter_eggleton(rp_au, q_eg);
+                                    /* HPP 2026-06-22: BSE-faithful core-radius floor —
+                                     * `radx = MAX(radc, rol)` (evolv2.f). Prevents
+                                     * R_dyn from dropping below the core for tight
+                                     * eccentric donors. */
+                                    double R_dyn_cgs = CV_max(p->core_radius, CV_min(p->radius, R_L_eggleton_cgs));
+                                    r_eff_sse = R_dyn_cgs / CONST_R_SUN;
+                                }
+                            }
+                        }
+                    }
+                }
+                evolv1_(&kw,&sse_initial_mass,&mt,&r,&lum,&mc,&rc,&menv,&renv,&ospin,&epoch,&tms,&tphys,&tphysf,&dtp,&z,zpars,&k2,&r_eff_sse);
                 check_sse_error_codes();
 
                 if ( fabs(tphysf - desired_tphysf)/desired_tphysf > epsilon)

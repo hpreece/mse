@@ -96,6 +96,9 @@ extern double nova_accretion_factor;
 extern double alpha_wind_accretion;
 extern double beta_wind_accretion;
 
+extern int binary_evolution_force_beta_mt;
+extern double binary_evolution_beta_mt_user;
+
 extern double MSTAR_gbs_tolerance_default;
 extern double MSTAR_gbs_tolerance_kick;
 extern double MSTAR_stopping_condition_tolerance;

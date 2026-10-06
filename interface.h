@@ -177,6 +177,11 @@ int set_random_seed(int value);
 int get_verbose_flag(int *value);
 int set_verbose_flag(int value);
 
+int get_binary_evolution_force_beta_mt(int *value);
+int set_binary_evolution_force_beta_mt(int value);
+int get_binary_evolution_beta_mt_user(double *value);
+int set_binary_evolution_beta_mt_user(double value);
+
 /***********
  * Testing *
  * ********/

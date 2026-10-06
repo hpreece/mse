@@ -303,7 +303,19 @@ int handle_mass_transfer_cases(ParticlesMap *particlesMap, int parent_index, int
     }
     
     double rp = a*(1.0 - e);
-    if (rp < (R_donor + R_accretor)) /* Periapsis distance close enough to cause immediate merger rather than RLOF, so invoke coalescence (can happen in some cases, e.g., after SNe kicks) */
+
+    /* HPP 2026-06-20: truncate at Eggleton R_L for RLOF stars (H2a).
+     * Same logic as ODE_root_finding.cpp collision root: SSE-isolated radius
+     * during MT is a fiction; check against the physically-meaningful
+     * Roche-truncated radius. Genuine contact (accretor also overfilling its
+     * lobe) is caught separately by the accretor->RLOF_flag branch above.
+     * See MT_OVERMERGING_writeup.md §9 H2a and §19. */
+    double R_L_donor_eggleton    = roche_radius_pericenter_eggleton(rp, M_donor    / CV_max(M_accretor, epsilon));
+    double R_L_accretor_eggleton = roche_radius_pericenter_eggleton(rp, M_accretor / CV_max(M_donor,    epsilon));
+    double R_donor_for_merger_check    = (donor->RLOF_flag    == 1) ? CV_min(R_donor,    R_L_donor_eggleton)    : R_donor;
+    double R_accretor_for_merger_check = (accretor->RLOF_flag == 1) ? CV_min(R_accretor, R_L_accretor_eggleton) : R_accretor;
+
+    if (rp < (R_donor_for_merger_check + R_accretor_for_merger_check)) /* Periapsis distance close enough to cause immediate merger rather than RLOF, so invoke coalescence (can happen in some cases, e.g., after SNe kicks) */
     {
         if ((kw >= 2 and kw <= 9 and kw != 7) or (kw2 >= 2 and kw2 <= 9 and kw2 != 7)) /* CE if either donor or accretor are giants */
         {
@@ -1296,8 +1308,20 @@ int binary_stable_mass_transfer_evolution(ParticlesMap *particlesMap, int parent
     {
         donor->emt_ejection_radius_mode = 0;
     }
-    
-    
+
+    /* Beta-forcing sensitivity test, inserted before mass_dot_RLOF is set
+     * so the Hamers & Dosopoulou ODE, the adiabatic-ejection channel, and
+     * all downstream quantities see the forced value.
+     *   binary_evolution_force_beta_mt == 0: fiducial; leave dm2 at the
+     *       KH-timescale-limited value computed above.
+     *   binary_evolution_force_beta_mt == 1: override; replace dm2 with
+     *       binary_evolution_beta_mt_user * dm1, allowing the user to
+     *       sweep beta in [0, 1] for sensitivity studies. */
+    if (binary_evolution_force_beta_mt == 1)
+    {
+        dm2 = binary_evolution_beta_mt_user * dm1;
+    }
+
     /* Set mass transfer rates */
     donor->mass_dot_RLOF = -dm1/dt;
     accretor->mass_dot_RLOF = dm2/dt;

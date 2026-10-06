@@ -41,6 +41,7 @@ c-------------------------------------------------------------c
       real*8 epoch,tms,tphys,tphysf,dtp
       real*8 r,lum,ospin
       real*8 mc,rc,menv,renv
+      real*8 k2,r_eff
       character*50 text1,text2,text3
       character*30 label(16)
       data label /' Low Mass MS Star ',' Main sequence Star ',
@@ -129,9 +130,13 @@ c-------------------------------------------------------------c
 * tphysf will mean that no data is stored.
 *
       dtp = 0.d0
-* 
+*     HPP 2026-06-22: evolv1 now takes k2 and r_eff (sentinel 0 → use r).
+*     This standalone driver is dead code (not in libmse.so Makefile) but
+*     defusing the footgun for anyone who compiles sse.f directly.
+      k2 = 0.21d0
+      r_eff = 0.d0
       CALL evolv1(kw,mass,mt,r,lum,mc,rc,menv,renv,ospin,
-     &            epoch,tms,tphys,tphysf,dtp,z,zpars)
+     &            epoch,tms,tphys,tphysf,dtp,z,zpars,k2,r_eff)
 *
 ************************************************************************
 * Output:

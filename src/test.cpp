@@ -2300,7 +2300,9 @@ int test_sse_custom()
 
     printf("pre evolv1_() call --  kw %d mt %.15f sse_initial_mass %.15f r %.15f epoch %.15f age %.15f tphys %.15f tphysf %.15f ospin %.15f tms %.15f epoch %.15f k2 %.15f rc %.15f mc %.15f menv %.15f renv %.15f \n",kw,mt,sse_initial_mass,r,epoch,age,tphys,tphysf,ospin,tms,epoch,k2,rc,mc,menv,renv);
 
-    evolv1_(&kw,&sse_initial_mass,&mt,&r,&lum,&mc,&rc,&menv,&renv,&ospin,&epoch,&tms,&tphys,&tphysf,&dtp,&z,zpars,&k2);
+    /* HPP 2026-06-22: r_eff sentinel = 0; test harness, no MSE binary state. */
+    double r_eff_sse = 0.0;
+    evolv1_(&kw,&sse_initial_mass,&mt,&r,&lum,&mc,&rc,&menv,&renv,&ospin,&epoch,&tms,&tphys,&tphysf,&dtp,&z,zpars,&k2,&r_eff_sse);
     
     printf("post evolv1_() call --  kw %d mt %.15f sse_initial_mass %.15f r %.15f epoch %.15f age %.15f tphys %.15f tphysf %.15f ospin %.15f tms %.15f epoch %.15f k2 %.15f rc %.15f mc %.15f menv %.15f renv %.15f \n",kw,mt,sse_initial_mass,r,epoch,age,tphys,tphysf,ospin,tms,epoch,k2,rc,mc,menv,renv);
 
